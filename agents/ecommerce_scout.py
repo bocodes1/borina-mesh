@@ -354,11 +354,11 @@ async def run() -> None:
     report_md = format_report(ranked)
     report_dir = get_report_dir()
     pdf_path = report_dir / "ecommerce_scout_report.pdf"
-    generate_pdf(report_md, str(pdf_path))
+    generate_pdf(report_md, pdf_path)
     print(f"📄 Report saved: {pdf_path}")
 
     # Copy to Obsidian vault
-    copy_to_obsidian(str(pdf_path), "Agents/Reports")
+    copy_to_obsidian(pdf_path)
     print("📋 Copied to Obsidian vault.")
 
     # Send Telegram summary

@@ -326,7 +326,7 @@ async def scrape_resolution_rules() -> list[ResolutionEdge]:
 
 async def run() -> None:
     """Full intel pipeline: scrape → analyze → report → deliver."""
-    from shared.report import generate_pdf, save_to_obsidian
+    from shared.report import generate_pdf, get_report_dir, copy_to_obsidian
     from shared.telegram import send_summary
 
     print("[polymarket-intel] Scraping leaderboard...")
@@ -352,10 +352,11 @@ async def run() -> None:
     report_md = format_report(traders, whales, edges, strategy_gaps)
 
     # Save PDF + Obsidian
-    pdf_path = generate_pdf(report_md, "polymarket-intel")
-    obsidian_path = save_to_obsidian(report_md, "polymarket-intel")
+    report_dir = get_report_dir()
+    pdf_path = report_dir / "polymarket_intel_report.pdf"
+    generate_pdf(report_md, pdf_path)
+    copy_to_obsidian(pdf_path)
     print(f"[polymarket-intel] PDF: {pdf_path}")
-    print(f"[polymarket-intel] Obsidian: {obsidian_path}")
 
     # Telegram summary
     msg = format_telegram(

@@ -318,17 +318,14 @@ async def run():
         top_action=top_action,
     )
 
-    # Write report to obsidian vault
-    vault_path = os.path.expanduser(
-        r"C:\Users\wenbo\OneDrive\Documents\remote\Ads"
-    )
-    os.makedirs(vault_path, exist_ok=True)
-    from datetime import date
-    report_file = os.path.join(vault_path, f"ad-report-{date.today().isoformat()}.md")
-    with open(report_file, "w", encoding="utf-8") as f:
-        f.write(report)
+    # Generate PDF + copy to Obsidian
+    from shared.report import generate_pdf, get_report_dir, copy_to_obsidian
+    report_dir = get_report_dir()
+    pdf_path = report_dir / "adset_optimizer_report.pdf"
+    generate_pdf(report, pdf_path)
+    copy_to_obsidian(pdf_path)
 
-    print(f"Report saved: {report_file}")
+    print(f"Report saved: {pdf_path}")
     print(f"\nTelegram:\n{telegram_msg}")
 
     return report, telegram_msg
