@@ -27,14 +27,20 @@ class Agent:
             "model": self.model,
         }
 
-    async def stream(self, prompt: str) -> AsyncIterator[dict]:
+    async def stream(self, prompt: str, job_id: int | None = None) -> AsyncIterator[dict]:
         """Stream a response using Claude Agent SDK.
 
-        Uses ANTHROPIC_API_KEY if set, otherwise falls back to the `claude` CLI
-        subprocess (which uses the Claude Max subscription auth).
-
-        Yields: {"type": "text|tool_use|done", "content": str}
+        Publishes activity events and yields chunks: {"type": str, "content": str}
         """
+        from events import bus, ActivityEvent
+
+        await bus.publish(ActivityEvent(
+            agent_id=self.id,
+            kind="started",
+            message=f"{self.name} started: {prompt[:80]}",
+            job_id=job_id,
+        ))
+
         try:
             from claude_agent_sdk import query, ClaudeAgentOptions
 
@@ -43,16 +49,36 @@ class Agent:
                 model=self.model,
             )
 
+            text_total = 0
             async for message in query(prompt=prompt, options=options):
                 text = self._extract_text(message)
                 if text:
+                    text_total += len(text)
                     yield {"type": "text", "content": text}
 
+            await bus.publish(ActivityEvent(
+                agent_id=self.id,
+                kind="completed",
+                message=f"{self.name} completed ({text_total} chars)",
+                job_id=job_id,
+            ))
             yield {"type": "done", "content": ""}
         except ImportError:
+            await bus.publish(ActivityEvent(
+                agent_id=self.id,
+                kind="failed",
+                message="claude-agent-sdk not installed",
+                job_id=job_id,
+            ))
             yield {"type": "text", "content": "claude-agent-sdk not installed"}
             yield {"type": "done", "content": ""}
         except Exception as e:
+            await bus.publish(ActivityEvent(
+                agent_id=self.id,
+                kind="failed",
+                message=f"Agent error: {e}",
+                job_id=job_id,
+            ))
             yield {"type": "error", "content": f"Agent error: {e}"}
             yield {"type": "done", "content": ""}
 
