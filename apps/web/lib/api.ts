@@ -26,4 +26,14 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ agent_id: agentId, prompt }),
     }),
+  listSchedules: () => fetchJSON<Record<string, string>>("/schedules"),
+  setSchedule: (agentId: string, cron: string) =>
+    fetchJSON<{ agent_id: string; cron: string }>(`/schedules/${agentId}`, {
+      method: "PUT",
+      body: JSON.stringify({ cron }),
+    }),
+  removeSchedule: (agentId: string) =>
+    fetchJSON<{ agent_id: string; removed: boolean }>(`/schedules/${agentId}`, {
+      method: "DELETE",
+    }),
 };

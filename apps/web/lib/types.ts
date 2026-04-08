@@ -22,3 +22,8 @@ export interface StreamChunk {
   type: "text" | "tool_use" | "done" | "error";
   content: string;
 }
+
+export interface Schedule {
+  agent_id: string;
+  cron: string;
+}
