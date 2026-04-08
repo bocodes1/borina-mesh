@@ -57,3 +57,23 @@ def test_scout_agent_registered():
 def test_polymarket_agent_registered():
     from agents.polymarket import PolymarketIntelAgent
     assert PolymarketIntelAgent.id == "polymarket-intel"
+
+
+def test_researcher_agent_registered():
+    from agents.researcher import ResearcherAgent
+    assert ResearcherAgent.id == "researcher"
+
+
+def test_trader_agent_registered():
+    from agents.trader import TraderAgent
+    assert TraderAgent.id == "trader"
+
+
+def test_adset_agent_registered():
+    from agents.adset import AdsetOptimizerAgent
+    assert AdsetOptimizerAgent.id == "adset-optimizer"
+
+
+def test_inbox_agent_registered():
+    from agents.inbox import InboxTriageAgent
+    assert InboxTriageAgent.id == "inbox-triage"
