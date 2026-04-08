@@ -8,7 +8,7 @@ from fastapi.responses import RedirectResponse
 from dotenv import load_dotenv
 
 from db import init_db
-from routes import agents as agents_routes, chat as chat_routes, jobs as jobs_routes, activity as activity_routes, schedules as schedules_routes
+from routes import agents as agents_routes, chat as chat_routes, jobs as jobs_routes, activity as activity_routes, schedules as schedules_routes, analytics as analytics_routes
 from scheduler import scheduler_service
 
 # Import agent modules to trigger registration
@@ -55,6 +55,7 @@ app.include_router(chat_routes.router)
 app.include_router(jobs_routes.router)
 app.include_router(activity_routes.router)
 app.include_router(schedules_routes.router)
+app.include_router(analytics_routes.router)
 
 
 @app.get("/")
