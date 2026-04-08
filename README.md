@@ -48,20 +48,62 @@ Borina Mesh is a unified control plane for specialized AI agents running on your
 
 ## Quick Start
 
+### Prerequisites
+
+- **Claude Code CLI** installed and authenticated (`claude` command logged into your Claude Max/Pro subscription)
+  - Install: https://docs.claude.com/en/docs/claude-code
+  - Auth: run `claude` once and follow the login flow
+- Docker + Docker Compose
+- Git
+
+### Install
+
 ```bash
 # Clone
 git clone https://github.com/bocodes1/borina-mesh.git
 cd borina-mesh
 
-# Configure
+# Configure (optional — leave ANTHROPIC_API_KEY blank to use Claude Code subprocess)
 cp apps/api/.env.example .env
-# Edit .env — add ANTHROPIC_API_KEY
 
 # Run
 bash scripts/bootstrap.sh
 ```
 
 Open **http://localhost:3000** — dashboard. API docs at **http://localhost:8000/docs**.
+
+### Auth modes
+
+Borina Mesh uses the official [Claude Agent SDK](https://github.com/anthropics/claude-agent-sdk), which supports two auth paths:
+
+| Mode | When to use | Cost |
+|------|-------------|------|
+| **Claude Code subprocess** (default) | You have a Claude Max or Pro subscription | Included in subscription |
+| **API key** | You want to pay per token instead | Set `ANTHROPIC_API_KEY` in `.env` |
+
+On the Mac Mini, the default subprocess mode uses your existing `claude` CLI auth — no extra setup needed.
+
+### Subprocess mode: run natively on Mac Mini (recommended)
+
+Docker containers don't have the `claude` CLI inside them, so subprocess mode needs the API to run natively on the host:
+
+```bash
+# Terminal 1 — API (native, uses your Claude Code auth)
+cd apps/api
+pip install -r requirements.txt
+python -m uvicorn main:app --port 8000
+
+# Terminal 2 — Web (can be Docker or native)
+cd apps/web
+npm install
+npm run dev
+```
+
+Or use the included `scripts/dev.sh` to run both:
+
+```bash
+bash scripts/dev.sh
+```
 
 ## Adding a New Agent
 

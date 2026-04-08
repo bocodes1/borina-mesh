@@ -1,6 +1,5 @@
 """Base Agent class + registry — wired to Claude Agent SDK."""
 
-import os
 from typing import ClassVar, AsyncIterator, Optional
 
 
@@ -31,14 +30,11 @@ class Agent:
     async def stream(self, prompt: str) -> AsyncIterator[dict]:
         """Stream a response using Claude Agent SDK.
 
+        Uses ANTHROPIC_API_KEY if set, otherwise falls back to the `claude` CLI
+        subprocess (which uses the Claude Max subscription auth).
+
         Yields: {"type": "text|tool_use|done", "content": str}
         """
-        api_key = os.getenv("ANTHROPIC_API_KEY", "")
-        if not api_key:
-            yield {"type": "text", "content": "ANTHROPIC_API_KEY not set in .env"}
-            yield {"type": "done", "content": ""}
-            return
-
         try:
             from claude_agent_sdk import query, ClaudeAgentOptions
 
