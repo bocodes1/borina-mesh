@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { motion } from "framer-motion";
 import { AgentGrid } from "@/components/agent-grid";
+import { ChatPanel } from "@/components/chat-panel";
 import type { Agent } from "@/lib/types";
 
 export default function Home() {
@@ -25,12 +26,7 @@ export default function Home() {
       </motion.div>
 
       <AgentGrid onSelectAgent={setSelectedAgent} />
-
-      {selectedAgent && (
-        <div className="mt-8 p-4 rounded-lg bg-card border">
-          Selected: <strong>{selectedAgent.name}</strong> — chat panel coming in Task 11
-        </div>
-      )}
+      <ChatPanel agent={selectedAgent} onClose={() => setSelectedAgent(null)} />
     </main>
   );
 }
