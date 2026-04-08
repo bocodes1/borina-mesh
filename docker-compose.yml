@@ -1,0 +1,28 @@
+version: "3.9"
+
+services:
+  api:
+    build: ./apps/api
+    ports:
+      - "8000:8000"
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - DATABASE_URL=sqlite:////data/borina.db
+      - CORS_ORIGINS=http://localhost:3000,http://mac-mini.local:3000
+    volumes:
+      - borina-data:/data
+      - ${OBSIDIAN_VAULT_PATH:-./vault}:/vault:ro
+    restart: unless-stopped
+
+  web:
+    build: ./apps/web
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://api:8000
+    depends_on:
+      - api
+    restart: unless-stopped
+
+volumes:
+  borina-data:
