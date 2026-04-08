@@ -1,6 +1,5 @@
 """Polymarket Intel Agent — leaderboard + whale + resolution rule analysis."""
 
-from typing import AsyncIterator
 from agents.base import Agent, registry
 
 
@@ -19,11 +18,7 @@ class PolymarketIntelAgent(Agent):
 
 Output: PDF report to reports/{today}/polymarket-intel.pdf + Telegram summary."""
     tools = ["web_fetch", "read_file", "write_file"]
-
-    async def stream(self, prompt: str) -> AsyncIterator[dict]:
-        yield {"type": "text", "content": f"Polymarket Intel analyzing: {prompt}\n"}
-        yield {"type": "text", "content": "(Claude Agent SDK integration in Task 7)\n"}
-        yield {"type": "done", "content": ""}
+    model = "claude-opus-4-6"
 
 
 registry.register(PolymarketIntelAgent)

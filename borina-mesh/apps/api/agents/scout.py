@@ -1,6 +1,5 @@
 """Ecommerce Scout Agent — product discovery from KaloData + Meta Ad Library."""
 
-from typing import AsyncIterator
 from agents.base import Agent, registry
 
 
@@ -18,11 +17,7 @@ class EcommerceScoutAgent(Agent):
 
 Output: PDF report to reports/{today}/product-ideas.pdf + Telegram summary."""
     tools = ["computer_use", "read_file", "write_file"]
-
-    async def stream(self, prompt: str) -> AsyncIterator[dict]:
-        yield {"type": "text", "content": f"Scout analyzing: {prompt}\n"}
-        yield {"type": "text", "content": "(Claude Agent SDK integration in Task 7)\n"}
-        yield {"type": "done", "content": ""}
+    model = "claude-opus-4-6"
 
 
 registry.register(EcommerceScoutAgent)
