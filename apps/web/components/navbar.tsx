@@ -21,7 +21,7 @@ export function Navbar() {
     <motion.nav
       initial={{ opacity: 0, y: -10 }}
       animate={{ opacity: 1, y: 0 }}
-      className="mb-8 flex items-center justify-between"
+      className="mb-6 flex items-center justify-between flex-wrap gap-4"
     >
       <Link href="/" className="flex items-center gap-3">
         <div className="h-8 w-8 rounded-lg bg-gradient-to-br from-primary to-purple-400 shadow-lg" />
@@ -30,7 +30,7 @@ export function Navbar() {
         </span>
       </Link>
 
-      <div className="flex items-center gap-1 glass rounded-full p-1">
+      <div className="flex items-center gap-1 glass rounded-full p-1 overflow-x-auto max-w-full">
         {links.map(({ href, label, icon: Icon }) => {
           const active = pathname === href;
           return (
@@ -38,12 +38,12 @@ export function Navbar() {
               key={href}
               href={href}
               className={cn(
-                "flex items-center gap-2 px-4 py-1.5 rounded-full text-sm font-medium transition-colors",
+                "flex items-center gap-2 px-3 md:px-4 py-1.5 rounded-full text-sm font-medium transition-colors whitespace-nowrap",
                 active ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"
               )}
             >
               <Icon className="h-4 w-4" />
-              {label}
+              <span className="hidden sm:inline">{label}</span>
             </Link>
           );
         })}
