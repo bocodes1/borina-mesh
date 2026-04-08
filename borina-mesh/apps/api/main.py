@@ -7,16 +7,23 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 from dotenv import load_dotenv
 
+from db import init_db
+from routes import agents as agents_routes, chat as chat_routes, jobs as jobs_routes
+
+# Import agent modules to trigger registration
+import agents.ceo  # noqa
+import agents.scout  # noqa
+import agents.polymarket  # noqa
+
 load_dotenv()
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """App startup/shutdown lifecycle."""
-    # Startup
     print("Borina Mesh starting...")
+    init_db()
     yield
-    # Shutdown
     print("Borina Mesh shutting down...")
 
 
@@ -27,8 +34,6 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-
-# CORS
 cors_origins = os.getenv("CORS_ORIGINS", "http://localhost:3000").split(",")
 app.add_middleware(
     CORSMiddleware,
@@ -37,6 +42,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.include_router(agents_routes.router)
+app.include_router(chat_routes.router)
+app.include_router(jobs_routes.router)
 
 
 @app.get("/")
