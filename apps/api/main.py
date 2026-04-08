@@ -8,7 +8,8 @@ from fastapi.responses import RedirectResponse
 from dotenv import load_dotenv
 
 from db import init_db
-from routes import agents as agents_routes, chat as chat_routes, jobs as jobs_routes, activity as activity_routes
+from routes import agents as agents_routes, chat as chat_routes, jobs as jobs_routes, activity as activity_routes, schedules as schedules_routes
+from scheduler import scheduler_service
 
 # Import agent modules to trigger registration
 import agents.ceo  # noqa
@@ -23,7 +24,9 @@ async def lifespan(app: FastAPI):
     """App startup/shutdown lifecycle."""
     print("Borina Mesh starting...")
     init_db()
+    scheduler_service.start()
     yield
+    scheduler_service.stop()
     print("Borina Mesh shutting down...")
 
 
@@ -47,6 +50,7 @@ app.include_router(agents_routes.router)
 app.include_router(chat_routes.router)
 app.include_router(jobs_routes.router)
 app.include_router(activity_routes.router)
+app.include_router(schedules_routes.router)
 
 
 @app.get("/")
