@@ -27,3 +27,11 @@ export interface Schedule {
   agent_id: string;
   cron: string;
 }
+
+export interface Artifact {
+  date: string;
+  name: string;
+  size_bytes: number;
+  modified: string;
+  path: string;
+}

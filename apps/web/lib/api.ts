@@ -1,4 +1,4 @@
-import type { Agent, Job } from "./types";
+import type { Agent, Job, Artifact } from "./types";
 
 const API_BASE = "/api"; // proxied to backend via next.config.js
 
@@ -36,4 +36,5 @@ export const api = {
     fetchJSON<{ agent_id: string; removed: boolean }>(`/schedules/${agentId}`, {
       method: "DELETE",
     }),
+  listArtifacts: () => fetchJSON<Artifact[]>("/artifacts"),
 };
