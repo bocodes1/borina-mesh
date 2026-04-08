@@ -40,3 +40,20 @@ def test_registry_duplicate_raises():
     registry.register(FakeAgent)
     with pytest.raises(ValueError, match="already registered"):
         registry.register(FakeAgent)
+
+
+def test_ceo_agent_registered():
+    from agents.ceo import CEOAgent
+    assert CEOAgent.id == "ceo"
+    assert CEOAgent.name
+    assert CEOAgent.system_prompt
+
+
+def test_scout_agent_registered():
+    from agents.scout import EcommerceScoutAgent
+    assert EcommerceScoutAgent.id == "ecommerce-scout"
+
+
+def test_polymarket_agent_registered():
+    from agents.polymarket import PolymarketIntelAgent
+    assert PolymarketIntelAgent.id == "polymarket-intel"
