@@ -3,13 +3,15 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { motion } from "framer-motion";
-import { LayoutGrid, Network, BarChart3 } from "lucide-react";
+import { LayoutGrid, Network, BarChart3, FileText, ListTodo } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const links = [
   { href: "/", label: "Mesh", icon: LayoutGrid },
   { href: "/network", label: "Network", icon: Network },
   { href: "/analytics", label: "Analytics", icon: BarChart3 },
+  { href: "/jobs", label: "Jobs", icon: ListTodo },
+  { href: "/artifacts", label: "Files", icon: FileText },
 ];
 
 export function Navbar() {
