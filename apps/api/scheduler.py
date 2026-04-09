@@ -101,6 +101,32 @@ class SchedulerService:
             except Exception as e:
                 print(f"[scheduler] Failed to register {agent_id}: {e}")
 
+        # Wiki daily digest — runs at 8 AM UTC, sends Telegram summary of
+        # yesterday's reviewer rejections.
+        digest_job_id = "wiki-daily-digest"
+        if not self._scheduler.get_job(digest_job_id):
+            try:
+                trigger = parse_cron("0 8 * * *")
+                self._scheduler.add_job(
+                    self._run_digest,
+                    trigger=trigger,
+                    id=digest_job_id,
+                    replace_existing=True,
+                )
+                self._schedules["wiki-daily-digest"] = "0 8 * * *"
+                print("[scheduler] Registered default: wiki-daily-digest @ 0 8 * * *")
+            except Exception as e:
+                print(f"[scheduler] Failed to register wiki digest: {e}")
+
+    async def _run_digest(self) -> None:
+        """Run the wiki daily digest."""
+        try:
+            from wiki_engine.digest import send_daily_digest
+            count = await send_daily_digest()
+            print(f"[scheduler] wiki digest sent ({count} rejections)")
+        except Exception as e:
+            print(f"[scheduler] wiki digest error: {e}")
+
     async def _run_agent(self, agent_id: str) -> None:
         """Execute an agent's scheduled run with full Job/AgentRun persistence."""
         from datetime import datetime
