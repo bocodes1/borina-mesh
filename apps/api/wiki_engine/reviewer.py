@@ -96,7 +96,7 @@ Output ONLY the JSON object described in your system prompt. No prose around it.
 
     options = ClaudeAgentOptions(
         system_prompt=REVIEWER_SYSTEM_PROMPT,
-        model="claude-opus-4-6",
+        model="claude-haiku-4-5",
     )
 
     buffer_parts: list[str] = []
@@ -176,11 +176,12 @@ def _extract_json_object(text: str) -> dict | None:
     return None
 
 
-async def process_pending(max_items: int = 20) -> dict:
-    """Pop pending proposals one at a time, review each, apply edits.
+async def process_pending(max_items: int = 50, concurrency: int = 8) -> dict:
+    """Pop pending proposals and review in parallel with bounded concurrency.
 
     Returns a summary dict: {processed, approved, rejected, errors}.
     """
+    import asyncio
     from wiki_engine.queue import list_pending, pop_pending
     from wiki_engine.mutator import apply_edit, append_to_log, EditOp
     from wiki_engine.audit import log_approved, log_rejected
@@ -188,12 +189,31 @@ async def process_pending(max_items: int = 20) -> dict:
     summary = {"processed": 0, "approved": 0, "rejected": 0, "errors": 0}
 
     pending = list_pending()[:max_items]
-    for prop in pending:
-        try:
-            decision = await review_proposal(prop)
-        except Exception as e:
-            print(f"[reviewer] fatal review error on {prop.id}: {e}")
+    if not pending:
+        return summary
+
+    sem = asyncio.Semaphore(concurrency)
+
+    async def review_one(prop):
+        async with sem:
+            try:
+                decision = await review_proposal(prop)
+            except Exception as e:
+                print(f"[reviewer] fatal review error on {prop.id}: {e}")
+                return (prop, None, str(e))
+            return (prop, decision, None)
+
+    results = await asyncio.gather(*[review_one(p) for p in pending])
+
+    for prop, decision, err in results:
+        if err or decision is None:
             summary["errors"] += 1
+            # Still pop to avoid reprocessing
+            pop_pending(prop.id)
+            try:
+                log_rejected(proposal_id=prop.id, reason=f"reviewer error: {err}")
+            except Exception:
+                pass
             continue
 
         pop_pending(prop.id)
@@ -228,7 +248,6 @@ async def process_pending(max_items: int = 20) -> dict:
                     f"{decision.get('reason', '')[:80]}"
                 )
             else:
-                # Approved but no edits actually applied → treat as rejection
                 log_rejected(
                     proposal_id=prop.id,
                     reason="approved but all edits failed to apply",
