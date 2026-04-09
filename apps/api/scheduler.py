@@ -168,6 +168,30 @@ class SchedulerService:
                     session.add(run)
                 session.add(final_job)
                 session.commit()
+                if error_msg:
+                    try:
+                        from artifacts import save_run_output
+                        save_run_output(
+                            agent_id=agent_id,
+                            job_id=job_id,
+                            prompt=prompt,
+                            output=f"ERROR: {error_msg}\n\nPartial output:\n{''.join(output_parts)}",
+                            status="failed",
+                        )
+                    except Exception:
+                        pass
+                else:
+                    try:
+                        from artifacts import save_run_output
+                        save_run_output(
+                            agent_id=agent_id,
+                            job_id=job_id,
+                            prompt=prompt,
+                            output="".join(output_parts),
+                            status="completed",
+                        )
+                    except Exception as e:
+                        print(f"[scheduler] Failed to save run output file: {e}")
 
 
 # Global singleton

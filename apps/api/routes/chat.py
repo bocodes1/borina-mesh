@@ -79,5 +79,31 @@ async def chat(agent_id: str, body: ChatRequest):
                         session.add(run)
                     session.add(final_job)
                     session.commit()
+                    if error_msg:
+                        # Also save failed runs so errors are visible in Files
+                        try:
+                            from artifacts import save_run_output
+                            save_run_output(
+                                agent_id=agent_id,
+                                job_id=job_id,
+                                prompt=body.prompt,
+                                output=f"ERROR: {error_msg}\n\nPartial output:\n{''.join(output_parts)}",
+                                status="failed",
+                            )
+                        except Exception:
+                            pass
+                    else:
+                        # Save to file so it appears in Files tab + syncs to vault
+                        try:
+                            from artifacts import save_run_output
+                            save_run_output(
+                                agent_id=agent_id,
+                                job_id=job_id,
+                                prompt=body.prompt,
+                                output=full_output,
+                                status="completed",
+                            )
+                        except Exception as e:
+                            print(f"[chat] Failed to save run output file: {e}")
 
     return EventSourceResponse(event_generator())

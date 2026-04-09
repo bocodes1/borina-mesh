@@ -35,3 +35,13 @@ export interface Artifact {
   modified: string;
   path: string;
 }
+
+export interface AgentRun {
+  id: number;
+  job_id: number;
+  agent_id: string;
+  output: string;
+  tokens_used: number;
+  cost_usd: number;
+  created_at: string;
+}

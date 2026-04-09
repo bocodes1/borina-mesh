@@ -94,3 +94,55 @@ def get_artifact_path(date: str, name: str) -> Path:
     if last_candidate is not None:
         return last_candidate
     raise ValueError("invalid path: no roots configured")
+
+
+def save_run_output(agent_id: str, job_id: int, prompt: str, output: str, status: str) -> Path | None:
+    """Save an agent run's output as a markdown file in reports/{today}/.
+
+    Returns the path if written, None if output was empty.
+    """
+    if not output or not output.strip():
+        return None
+
+    from datetime import date, datetime
+    root = Path(os.getenv("REPORTS_DIR", "./reports")).resolve()
+    day_dir = root / date.today().isoformat()
+    day_dir.mkdir(parents=True, exist_ok=True)
+
+    # Filename: {agent}-{job_id}-{hhmm}.md to keep them sortable + unique
+    now = datetime.now()
+    safe_agent = agent_id.replace("/", "-")
+    filename = f"{safe_agent}-{job_id:05d}-{now.strftime('%H%M')}.md"
+    path = day_dir / filename
+
+    # Build the markdown document
+    lines = [
+        f"# {agent_id} — Job #{job_id}",
+        f"",
+        f"**Status:** {status}",
+        f"**Timestamp:** {now.isoformat()}",
+        f"**Prompt:**",
+        f"",
+        f"> {prompt.strip()}",
+        f"",
+        f"---",
+        f"",
+        f"## Output",
+        f"",
+        output.strip(),
+        f"",
+    ]
+    path.write_text("\n".join(lines), encoding="utf-8")
+
+    # Also copy to Obsidian vault if configured
+    vault = os.getenv("OBSIDIAN_VAULT_PATH", "").strip()
+    if vault:
+        try:
+            vault_dir = (Path(vault).expanduser() / "reports" / date.today().isoformat()).resolve()
+            vault_dir.mkdir(parents=True, exist_ok=True)
+            import shutil
+            shutil.copy2(path, vault_dir / filename)
+        except Exception as e:
+            print(f"[artifacts] Failed to copy to vault: {e}")
+
+    return path

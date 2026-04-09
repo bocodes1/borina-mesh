@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlmodel import Session, select
 from db import get_session, init_db
-from models import Job, JobStatus
+from models import Job, JobStatus, AgentRun
 from agents.base import registry
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
@@ -47,3 +47,13 @@ async def get_job(job_id: int, session: Session = Depends(get_session)):
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
     return job
+
+
+@router.get("/{job_id}/runs")
+async def get_job_runs(job_id: int, session: Session = Depends(get_session)):
+    """Get all AgentRun records for a specific job."""
+    job = session.get(Job, job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    runs = session.exec(select(AgentRun).where(AgentRun.job_id == job_id)).all()
+    return runs

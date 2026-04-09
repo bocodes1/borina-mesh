@@ -7,6 +7,7 @@ import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { api } from "@/lib/api";
 import type { Job, Agent } from "@/lib/types";
+import { JobDetailModal } from "./job-detail-modal";
 
 const STATUS_ICONS: Record<Job["status"], React.ReactNode> = {
   pending: <Clock className="h-4 w-4 text-muted-foreground" />,
@@ -29,6 +30,7 @@ export function JobHistory() {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [filter, setFilter] = useState<string>("all");
   const [loading, setLoading] = useState(true);
+  const [selectedJob, setSelectedJob] = useState<Job | null>(null);
 
   useEffect(() => {
     Promise.all([api.listJobs(), api.listAgents()])
@@ -87,7 +89,8 @@ export function JobHistory() {
               initial={{ opacity: 0, x: -10 }}
               animate={{ opacity: 1, x: 0 }}
               transition={{ delay: Math.min(i * 0.02, 0.5) }}
-              className="p-4 hover:bg-accent/50 transition-colors"
+              onClick={() => setSelectedJob(job)}
+              className="p-4 hover:bg-accent/50 transition-colors cursor-pointer"
             >
               <div className="flex items-center gap-4">
                 <div>{STATUS_ICONS[job.status]}</div>
@@ -115,6 +118,12 @@ export function JobHistory() {
           ))}
         </div>
       </Card>
+      <JobDetailModal
+        job={selectedJob}
+        agentName={selectedJob ? agentMap[selectedJob.agent_id]?.name : undefined}
+        agentEmoji={selectedJob ? agentMap[selectedJob.agent_id]?.emoji : undefined}
+        onClose={() => setSelectedJob(null)}
+      />
     </div>
   );
 }
