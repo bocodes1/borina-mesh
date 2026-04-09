@@ -19,7 +19,10 @@ class Agent:
     @property
     def model(self) -> str:
         from agents.models import resolve_model
-        return resolve_model(self.id)
+        try:
+            return resolve_model(self.id)
+        except KeyError:
+            return "claude-sonnet-4-6"
 
     def to_dict(self) -> dict:
         return {
