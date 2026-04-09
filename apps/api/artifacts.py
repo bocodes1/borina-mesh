@@ -150,21 +150,9 @@ def save_run_output(agent_id: str, job_id: int, prompt: str, output: str, status
         except Exception as e:
             print(f"[artifacts] Failed to copy to vault: {e}")
 
-    # Also propose this run to the wiki engine (unless it IS the curator)
-    if agent_id != "curator":
-        try:
-            from wiki_engine.queue import enqueue_proposal
-            enqueue_proposal(
-                source=f"borina:{agent_id}",
-                agent_id=agent_id,
-                prompt=prompt,
-                content=output,
-            )
-        except RuntimeError:
-            # Vault not configured — silently skip
-            pass
-        except Exception as e:
-            print(f"[artifacts] failed to enqueue proposal: {e}")
+    # Auto-propose to wiki engine is DISABLED.
+    # Only explicit user actions should write to the vault. See:
+    # docs/superpowers/plans/2026-04-09-wiki-v2.md (pending user review).
 
     return pdf_path
 

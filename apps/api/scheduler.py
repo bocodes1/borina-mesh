@@ -84,7 +84,7 @@ class SchedulerService:
             # 2 PM verification check, 4 PM gym accountability ping.
             "trader":            "*/30 * * * *", # Every 30 min — bot health watcher (borina-bot.md)
             "inbox-triage":      "0 */2 * * *",  # Every 2 hours — email/Telegram digest (borina-bot.md)
-            "curator":           "*/30 * * * *",  # Every 30 min — wiki reviewer sweep
+            # "curator": DISABLED pending wiki v2 redesign — manual /wiki/review only
             # NOTE: weekly memory curator (Sun 10 AM ET = 14 UTC, CRON-SETUP.md)
             # and monthly memory archive (1st of month) are not mapped to a
             # default agent yet — spawn via Memory Curator agent when added.
