@@ -1,10 +1,14 @@
 export interface Agent {
   id: string;
   name: string;
-  emoji: string;
+  emoji: string;  // keep for backward compat with API response
   tagline: string;
   tools: string[];
   model: string;
+  last_run_at?: string | null;
+  next_run_at?: string | null;
+  qa_verdict?: string | null;
+  status?: "idle" | "running" | "qa_flagged" | "error";
 }
 
 export interface Job {
@@ -16,6 +20,13 @@ export interface Job {
   started_at: string | null;
   completed_at: string | null;
   error: string | null;
+  kind?: string;
+  repo_path?: string | null;
+  base_branch?: string | null;
+  worker_branch?: string | null;
+  log_path?: string | null;
+  qa_verdict?: string | null;
+  qa_notes?: string | null;
 }
 
 export interface StreamChunk {
