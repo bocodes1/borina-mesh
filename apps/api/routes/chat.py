@@ -9,6 +9,7 @@ from pydantic import BaseModel
 from sqlmodel import Session
 
 from agents.base import registry
+from agents.qa_director import QADirector, ReviewVerdict
 from db import engine
 from models import Job, AgentRun, JobStatus
 
@@ -20,7 +21,7 @@ class ChatRequest(BaseModel):
 
 
 @router.post("/{agent_id}")
-async def chat(agent_id: str, body: ChatRequest):
+async def chat(agent_id: str, body: ChatRequest, raw: bool = False):
     """Stream agent response via SSE."""
     agent = registry.get(agent_id)
     if not agent:
@@ -41,6 +42,9 @@ async def chat(agent_id: str, body: ChatRequest):
     async def event_generator():
         output_parts = []
         error_msg = None
+        qa_verdict = None
+        qa_notes = None
+        full_output = ""
         try:
             async for chunk in agent.stream(body.prompt, job_id=job_id):
                 if chunk.get("type") == "text":
@@ -52,8 +56,28 @@ async def chat(agent_id: str, body: ChatRequest):
                     "data": json.dumps(chunk),
                 }
                 await asyncio.sleep(0.01)
+
+            # QA Director gatekeeper — runs after stream completes, still async
+            if not raw and not error_msg:
+                full_output = "".join(output_parts)
+                try:
+                    qa = QADirector()
+                    review = await qa.review(full_output, body.prompt)
+                    qa_verdict = review.verdict.value
+                    qa_notes = review.notes
+                    if review.verdict == ReviewVerdict.BLOCK:
+                        full_output = f"[BLOCKED BY QA DIRECTOR] {review.notes}"
+                    elif review.verdict == ReviewVerdict.APPROVE_WITH_NOTES:
+                        full_output = f"{full_output}\n\n---\nQA notes: {review.notes}"
+                except Exception as e:
+                    qa_notes = f"QA review failed: {e}"
+                    full_output = "".join(output_parts)
+            else:
+                full_output = "".join(output_parts)
+
         except Exception as e:
             error_msg = str(e)
+            full_output = "".join(output_parts)
             yield {
                 "event": "error",
                 "data": json.dumps({"error": error_msg}),
@@ -68,13 +92,14 @@ async def chat(agent_id: str, body: ChatRequest):
                         final_job.error = error_msg
                     else:
                         final_job.status = JobStatus.COMPLETED
-                        full_output = "".join(output_parts)
                         run = AgentRun(
                             job_id=job_id,
                             agent_id=agent_id,
                             output=full_output,
                             tokens_used=0,
                             cost_usd=0.0,
+                            qa_verdict=qa_verdict,
+                            qa_notes=qa_notes,
                         )
                         session.add(run)
                     session.add(final_job)
@@ -87,7 +112,7 @@ async def chat(agent_id: str, body: ChatRequest):
                                 agent_id=agent_id,
                                 job_id=job_id,
                                 prompt=body.prompt,
-                                output=f"ERROR: {error_msg}\n\nPartial output:\n{''.join(output_parts)}",
+                                output=f"ERROR: {error_msg}\n\nPartial output:\n{full_output}",
                                 status="failed",
                             )
                         except Exception:

@@ -27,3 +27,25 @@ def test_parse_block():
 def test_parse_garbage_default_safe():
     r = _parse_verdict("¯\\_(ツ)_/¯")
     assert r.verdict == ReviewVerdict.APPROVE_WITH_NOTES
+
+
+# --- Chat route: raw param ---
+
+def test_chat_raw_bypasses_qa():
+    """?raw=true should be accepted by the route without a 422."""
+    from fastapi.testclient import TestClient
+    from main import app
+    client = TestClient(app)
+    # Will fail with 404 (agent not found) or 500 (SDK not installed),
+    # but must NOT 422 — that would mean FastAPI rejected the query param.
+    r = client.post("/chat/inbox-triage?raw=true", json={"prompt": "test"})
+    assert r.status_code != 422, f"Route rejected raw param: {r.text}"
+
+
+def test_chat_raw_false_is_default():
+    """Omitting raw= should also be accepted (defaults to False)."""
+    from fastapi.testclient import TestClient
+    from main import app
+    client = TestClient(app)
+    r = client.post("/chat/inbox-triage", json={"prompt": "test"})
+    assert r.status_code != 422, f"Route rejected missing raw param: {r.text}"
