@@ -1,11 +1,13 @@
 """Job CRUD routes."""
 
+import os
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlmodel import Session, select
 from db import get_session, init_db
 from models import Job, JobStatus, AgentRun
 from agents.base import registry
+from workers.handoff import HandoffPayload, HandoffResponse
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
 
@@ -25,6 +27,32 @@ async def create_job(body: JobCreate, session: Session = Depends(get_session)):
     session.commit()
     session.refresh(job)
     return job
+
+
+@router.post("/handoff", response_model=HandoffResponse)
+async def create_handoff(body: HandoffPayload, session: Session = Depends(get_session)):
+    """Create an overnight_code job and enqueue a headless worker."""
+    if not os.path.isdir(os.path.join(body.repo_path, ".git")):
+        raise HTTPException(400, f"Not a git repo: {body.repo_path}")
+    job = Job(
+        agent_id="qa_director",
+        prompt=body.prompt,
+        kind="overnight_code",
+        repo_path=body.repo_path,
+        base_branch=body.base_branch,
+        status=JobStatus.PENDING,
+    )
+    session.add(job)
+    session.commit()
+    session.refresh(job)
+    from workers.claude_code_worker import enqueue_worker
+    enqueue_worker(job.id, body)
+    dashboard = os.environ.get("BORINA_DASHBOARD_URL", "http://localhost:3000")
+    return HandoffResponse(
+        job_id=job.id,
+        dashboard_url=f"{dashboard}/jobs/{job.id}",
+        worktree_path=f".borina-workers/{job.id}",
+    )
 
 
 @router.get("")
