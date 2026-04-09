@@ -150,6 +150,22 @@ def save_run_output(agent_id: str, job_id: int, prompt: str, output: str, status
         except Exception as e:
             print(f"[artifacts] Failed to copy to vault: {e}")
 
+    # Also propose this run to the wiki engine (unless it IS the curator)
+    if agent_id != "curator":
+        try:
+            from wiki_engine.queue import enqueue_proposal
+            enqueue_proposal(
+                source=f"borina:{agent_id}",
+                agent_id=agent_id,
+                prompt=prompt,
+                content=output,
+            )
+        except RuntimeError:
+            # Vault not configured — silently skip
+            pass
+        except Exception as e:
+            print(f"[artifacts] failed to enqueue proposal: {e}")
+
     return pdf_path
 
 
