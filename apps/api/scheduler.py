@@ -85,8 +85,12 @@ class SchedulerService:
                 print(f"[scheduler] Failed to register {agent_id}: {e}")
 
     async def _run_agent(self, agent_id: str) -> None:
-        """Execute an agent's scheduled run."""
+        """Execute an agent's scheduled run with full Job/AgentRun persistence."""
+        from datetime import datetime
+        from sqlmodel import Session
         from agents.base import registry
+        from db import engine
+        from models import Job, AgentRun, JobStatus
 
         agent = registry.get(agent_id)
         if not agent:
@@ -97,15 +101,57 @@ class SchedulerService:
             ))
             return
 
+        prompt = f"Run your scheduled daily task. Current time: {asyncio.get_event_loop().time()}"
+
+        with Session(engine) as session:
+            job = Job(
+                agent_id=agent_id,
+                prompt=f"[scheduled] {prompt}",
+                status=JobStatus.RUNNING,
+                started_at=datetime.utcnow(),
+            )
+            session.add(job)
+            session.commit()
+            session.refresh(job)
+            job_id = job.id
+
         await bus.publish(ActivityEvent(
             agent_id=agent_id,
             kind="scheduled",
             message=f"Scheduled run triggered for {agent.name}",
+            job_id=job_id,
         ))
 
-        prompt = f"Run your scheduled daily task. Current time: {asyncio.get_event_loop().time()}"
-        async for _ in agent.stream(prompt):
-            pass
+        output_parts = []
+        error_msg = None
+        try:
+            async for chunk in agent.stream(prompt, job_id=job_id):
+                if chunk.get("type") == "text":
+                    output_parts.append(chunk.get("content", ""))
+                elif chunk.get("type") == "error":
+                    error_msg = chunk.get("content", "unknown error")
+        except Exception as e:
+            error_msg = str(e)
+
+        with Session(engine) as session:
+            final_job = session.get(Job, job_id)
+            if final_job:
+                final_job.completed_at = datetime.utcnow()
+                if error_msg:
+                    final_job.status = JobStatus.FAILED
+                    final_job.error = error_msg
+                else:
+                    final_job.status = JobStatus.COMPLETED
+                    run = AgentRun(
+                        job_id=job_id,
+                        agent_id=agent_id,
+                        output="".join(output_parts),
+                        tokens_used=0,
+                        cost_usd=0.0,
+                    )
+                    session.add(run)
+                session.add(final_job)
+                session.commit()
 
 
 # Global singleton
