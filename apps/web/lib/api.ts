@@ -38,4 +38,20 @@ export const api = {
     }),
   listArtifacts: () => fetchJSON<Artifact[]>("/artifacts"),
   getJobRuns: (jobId: number) => fetchJSON<AgentRun[]>(`/jobs/${jobId}/runs`),
+  createHandoff: (body: { repo_path: string; base_branch: string; prompt: string }) =>
+    fetchJSON<{ job_id: number; dashboard_url: string; worktree_path: string }>("/jobs/handoff", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  cancelJob: (jobId: number) =>
+    fetchJSON<{ ok: boolean }>(`/jobs/${jobId}/cancel`, { method: "POST" }),
+  cleanupJob: (jobId: number) =>
+    fetchJSON<{ ok: boolean }>(`/jobs/${jobId}/cleanup`, { method: "POST" }),
+  getAgentModels: () => fetchJSON<Record<string, string>>("/agents/models"),
 };
+
+export function streamJobLog(jobId: number, onLine: (line: string) => void): () => void {
+  const es = new EventSource(`${API_BASE}/jobs/${jobId}/log`);
+  es.onmessage = (e) => onLine(e.data);
+  return () => es.close();
+}

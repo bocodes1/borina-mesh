@@ -2,6 +2,7 @@
 
 import { motion } from "framer-motion";
 import { JobHistory } from "@/components/job-history";
+import { OvernightWorkers } from "@/components/overnight-workers";
 import { Navbar } from "@/components/navbar";
 
 export default function JobsPage() {
@@ -12,6 +13,20 @@ export default function JobsPage() {
       <motion.div
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
+        className="mb-6"
+      >
+        <h2 className="text-3xl font-bold tracking-tight">Overnight Workers</h2>
+        <p className="text-muted-foreground mt-1">Headless Claude Code jobs running in git worktrees.</p>
+      </motion.div>
+
+      <div className="mb-8">
+        <OvernightWorkers />
+      </div>
+
+      <motion.div
+        initial={{ opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.1 }}
         className="mb-6"
       >
         <h2 className="text-3xl font-bold tracking-tight">Job History</h2>
