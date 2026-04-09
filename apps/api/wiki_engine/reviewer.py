@@ -201,6 +201,21 @@ async def review_batch(items: list[dict]) -> dict:
                 summary["rejected"] += 1
                 continue
 
+            # Validate subcategory exists before calling apply_edit
+            from wiki_engine.schema import SUBCATEGORY_FILES
+            if category not in SUBCATEGORY_FILES or subcategory not in SUBCATEGORY_FILES.get(category, {}):
+                log_rejected(
+                    proposal_id=item_id,
+                    reason=f"invalid subcategory '{subcategory}' for category '{category}'",
+                )
+                summary["rejected"] += 1
+                summary["decisions"].append({
+                    "id": item_id,
+                    "decision": "reject",
+                    "reason": f"reviewer output invalid subcategory: {category}/{subcategory}",
+                })
+                continue
+
             try:
                 op = EditOp(
                     action="append",
