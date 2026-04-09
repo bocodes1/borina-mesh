@@ -176,10 +176,46 @@ class SchedulerService:
         except Exception as e:
             error_msg = str(e)
 
+        # QA gatekeeper — runs after a successful stream, retries once on REQUEST_RERUN
+        qa_verdict = None
+        qa_notes = None
+        if not error_msg:
+            try:
+                from agents.qa_director import QADirector, ReviewVerdict
+                qa = QADirector()
+                full_output = "".join(output_parts)
+                review = await qa.review(full_output, prompt)
+                qa_verdict = review.verdict.value
+                qa_notes = review.notes
+
+                if review.verdict == ReviewVerdict.REQUEST_RERUN:
+                    # Retry exactly once with QA feedback appended to prompt
+                    output_parts = []
+                    error_msg = None
+                    retry_prompt = f"{prompt}\n\n[QA rerun: {review.notes}]"
+                    try:
+                        async for chunk in agent.stream(retry_prompt, job_id=job_id):
+                            if chunk.get("type") == "text":
+                                output_parts.append(chunk.get("content", ""))
+                            elif chunk.get("type") == "error":
+                                error_msg = chunk.get("content", "unknown error")
+                    except Exception as e:
+                        error_msg = str(e)
+
+                    if not error_msg:
+                        full_output = "".join(output_parts)
+                        review2 = await qa.review(full_output, prompt)
+                        qa_verdict = review2.verdict.value
+                        qa_notes = review2.notes
+            except Exception as e:
+                qa_notes = f"QA review failed: {e}"
+
         with Session(engine) as session:
             final_job = session.get(Job, job_id)
             if final_job:
                 final_job.completed_at = datetime.utcnow()
+                final_job.qa_verdict = qa_verdict
+                final_job.qa_notes = qa_notes
                 if error_msg:
                     final_job.status = JobStatus.FAILED
                     final_job.error = error_msg
@@ -191,6 +227,8 @@ class SchedulerService:
                         output="".join(output_parts),
                         tokens_used=0,
                         cost_usd=0.0,
+                        qa_verdict=qa_verdict,
+                        qa_notes=qa_notes,
                     )
                     session.add(run)
                 session.add(final_job)
