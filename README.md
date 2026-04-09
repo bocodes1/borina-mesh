@@ -102,6 +102,19 @@ Borina Mesh can share its `reports/` directory with an Obsidian vault so artifac
 4. Pair this with Obsidian Sync and any report written on the Mac Mini is visible on the PC within seconds (and vice versa).
 
 
+### PDF Report Generation
+
+Agent run outputs are auto-saved as styled PDFs in `reports/{today}/`. These appear in the Files tab and (if vault sync is set up) get replicated to your Obsidian vault.
+
+**Mac Mini setup** — install native PDF libs once:
+```bash
+brew install pango cairo libffi
+cd apps/api && pip install weasyprint markdown-it-py
+```
+
+If WeasyPrint isn't available (Windows dev machines without GTK), the system falls back to writing plain markdown files — nothing breaks, just less pretty.
+
+
 ### Auth modes
 
 Borina Mesh uses the official [Claude Agent SDK](https://github.com/anthropics/claude-agent-sdk), which supports two auth paths:

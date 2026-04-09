@@ -97,9 +97,10 @@ def get_artifact_path(date: str, name: str) -> Path:
 
 
 def save_run_output(agent_id: str, job_id: int, prompt: str, output: str, status: str) -> Path | None:
-    """Save an agent run's output as a markdown file in reports/{today}/.
+    """Save an agent run's output as a styled PDF in reports/{today}/.
 
-    Returns the path if written, None if output was empty.
+    Falls back to markdown if PDF libraries aren't available (e.g. Windows dev machine
+    without GTK). Returns the path if written, None if output was empty.
     """
     if not output or not output.strip():
         return None
@@ -109,18 +110,57 @@ def save_run_output(agent_id: str, job_id: int, prompt: str, output: str, status
     day_dir = root / date.today().isoformat()
     day_dir.mkdir(parents=True, exist_ok=True)
 
-    # Filename: {agent}-{job_id}-{hhmm}.md to keep them sortable + unique
     now = datetime.now()
     safe_agent = agent_id.replace("/", "-")
-    filename = f"{safe_agent}-{job_id:05d}-{now.strftime('%H%M')}.md"
-    path = day_dir / filename
+    base_name = f"{safe_agent}-{job_id:05d}-{now.strftime('%H%M')}"
 
-    # Build the markdown document
+    # Try PDF generation first
+    pdf_path = day_dir / f"{base_name}.pdf"
+    success = _try_generate_pdf(
+        pdf_path=pdf_path,
+        agent_id=agent_id,
+        job_id=job_id,
+        prompt=prompt,
+        output=output,
+        status=status,
+        timestamp=now,
+    )
+
+    # Fall back to markdown if PDF generation failed
+    if not success:
+        pdf_path = day_dir / f"{base_name}.md"
+        _write_markdown_fallback(
+            md_path=pdf_path,
+            agent_id=agent_id,
+            job_id=job_id,
+            prompt=prompt,
+            output=output,
+            status=status,
+            timestamp=now,
+        )
+
+    # Copy to Obsidian vault if configured
+    vault = os.getenv("OBSIDIAN_VAULT_PATH", "").strip()
+    if vault:
+        try:
+            vault_dir = (Path(vault).expanduser() / "reports" / date.today().isoformat()).resolve()
+            vault_dir.mkdir(parents=True, exist_ok=True)
+            import shutil
+            shutil.copy2(pdf_path, vault_dir / pdf_path.name)
+        except Exception as e:
+            print(f"[artifacts] Failed to copy to vault: {e}")
+
+    return pdf_path
+
+
+def _write_markdown_fallback(md_path: Path, agent_id: str, job_id: int, prompt: str,
+                              output: str, status: str, timestamp) -> None:
+    """Write a plain markdown file as a fallback when PDF generation is unavailable."""
     lines = [
         f"# {agent_id} — Job #{job_id}",
         f"",
         f"**Status:** {status}",
-        f"**Timestamp:** {now.isoformat()}",
+        f"**Timestamp:** {timestamp.isoformat()}",
         f"**Prompt:**",
         f"",
         f"> {prompt.strip()}",
@@ -132,17 +172,314 @@ def save_run_output(agent_id: str, job_id: int, prompt: str, output: str, status
         output.strip(),
         f"",
     ]
-    path.write_text("\n".join(lines), encoding="utf-8")
+    md_path.write_text("\n".join(lines), encoding="utf-8")
 
-    # Also copy to Obsidian vault if configured
-    vault = os.getenv("OBSIDIAN_VAULT_PATH", "").strip()
-    if vault:
-        try:
-            vault_dir = (Path(vault).expanduser() / "reports" / date.today().isoformat()).resolve()
-            vault_dir.mkdir(parents=True, exist_ok=True)
-            import shutil
-            shutil.copy2(path, vault_dir / filename)
-        except Exception as e:
-            print(f"[artifacts] Failed to copy to vault: {e}")
 
-    return path
+def _try_generate_pdf(pdf_path: Path, agent_id: str, job_id: int, prompt: str,
+                      output: str, status: str, timestamp) -> bool:
+    """Try to generate a styled PDF. Returns True on success, False if libs missing."""
+    try:
+        from weasyprint import HTML, CSS
+        from markdown_it import MarkdownIt
+    except ImportError as e:
+        print(f"[artifacts] PDF generation unavailable (missing libs): {e}")
+        return False
+    except Exception as e:
+        # WeasyPrint can fail to import on Windows if GTK libs are missing
+        print(f"[artifacts] PDF generation unavailable: {e}")
+        return False
+
+    try:
+        # Render markdown output to HTML
+        md = MarkdownIt("commonmark", {"html": False, "linkify": True, "typographer": True})
+        md.enable("table")
+        output_html = md.render(output)
+        prompt_html = md.render(prompt)
+
+        # Status color
+        status_colors = {
+            "completed": "#10b981",
+            "failed": "#ef4444",
+            "running": "#3b82f6",
+            "pending": "#6b7280",
+            "cancelled": "#6b7280",
+        }
+        status_color = status_colors.get(status, "#6b7280")
+
+        formatted_timestamp = timestamp.strftime("%B %d, %Y · %I:%M %p")
+
+        html_doc = f"""<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>{agent_id} — Job #{job_id}</title>
+</head>
+<body>
+<header class="doc-header">
+    <div class="brand">
+        <div class="brand-mark"></div>
+        <div class="brand-text">BORINA</div>
+    </div>
+    <div class="meta-strip">
+        <div><span class="label">Agent</span><span class="value">{_escape(agent_id)}</span></div>
+        <div><span class="label">Job</span><span class="value">#{job_id}</span></div>
+        <div><span class="label">Status</span><span class="value status">{status.upper()}</span></div>
+        <div><span class="label">Generated</span><span class="value">{formatted_timestamp}</span></div>
+    </div>
+</header>
+
+<section class="prompt-section">
+    <div class="section-label">PROMPT</div>
+    <div class="prompt-box">{prompt_html}</div>
+</section>
+
+<section class="output-section">
+    <div class="section-label">OUTPUT</div>
+    <div class="output-body">{output_html}</div>
+</section>
+
+<footer class="doc-footer">
+    Generated by Borina Mesh · borina.local
+</footer>
+</body>
+</html>"""
+
+        css = CSS(string=f"""
+@page {{
+    size: Letter;
+    margin: 0.8in;
+    @bottom-right {{
+        content: counter(page) " / " counter(pages);
+        font-family: 'Helvetica Neue', Arial, sans-serif;
+        font-size: 9pt;
+        color: #9ca3af;
+    }}
+}}
+
+body {{
+    font-family: 'Helvetica Neue', 'Segoe UI', Arial, sans-serif;
+    font-size: 11pt;
+    line-height: 1.6;
+    color: #1f2937;
+    margin: 0;
+}}
+
+.doc-header {{
+    border-bottom: 2px solid #e5e7eb;
+    padding-bottom: 20px;
+    margin-bottom: 28px;
+}}
+
+.brand {{
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 18px;
+}}
+
+.brand-mark {{
+    width: 22px;
+    height: 22px;
+    border-radius: 6px;
+    background: linear-gradient(135deg, #8b5cf6 0%, #a78bfa 100%);
+}}
+
+.brand-text {{
+    font-size: 14pt;
+    font-weight: 700;
+    letter-spacing: 2px;
+    color: #111827;
+}}
+
+.meta-strip {{
+    display: flex;
+    flex-wrap: wrap;
+    gap: 24px;
+    font-size: 9pt;
+}}
+
+.meta-strip > div {{
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}}
+
+.meta-strip .label {{
+    text-transform: uppercase;
+    font-size: 7.5pt;
+    letter-spacing: 1px;
+    color: #9ca3af;
+    font-weight: 600;
+}}
+
+.meta-strip .value {{
+    font-size: 10.5pt;
+    color: #111827;
+    font-weight: 500;
+}}
+
+.meta-strip .status {{
+    color: {status_color};
+    font-weight: 700;
+    text-transform: uppercase;
+}}
+
+.section-label {{
+    text-transform: uppercase;
+    font-size: 8.5pt;
+    letter-spacing: 1.5px;
+    color: #9ca3af;
+    font-weight: 700;
+    margin-bottom: 10px;
+}}
+
+.prompt-section {{
+    margin-bottom: 32px;
+}}
+
+.prompt-box {{
+    background: #f9fafb;
+    border-left: 3px solid #8b5cf6;
+    padding: 14px 18px;
+    border-radius: 0 6px 6px 0;
+    font-style: italic;
+    color: #374151;
+}}
+
+.prompt-box p {{
+    margin: 0;
+}}
+
+.output-section {{
+    margin-bottom: 40px;
+}}
+
+.output-body h1 {{
+    font-size: 20pt;
+    color: #111827;
+    border-bottom: 2px solid #e5e7eb;
+    padding-bottom: 8px;
+    margin-top: 28px;
+    margin-bottom: 14px;
+}}
+
+.output-body h2 {{
+    font-size: 16pt;
+    color: #1f2937;
+    margin-top: 24px;
+    margin-bottom: 12px;
+}}
+
+.output-body h3 {{
+    font-size: 13pt;
+    color: #374151;
+    margin-top: 20px;
+    margin-bottom: 10px;
+}}
+
+.output-body p {{
+    margin: 10px 0;
+}}
+
+.output-body ul, .output-body ol {{
+    padding-left: 22px;
+    margin: 10px 0;
+}}
+
+.output-body li {{
+    margin: 4px 0;
+}}
+
+.output-body code {{
+    background: #f3f4f6;
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-family: 'SF Mono', Menlo, Monaco, Consolas, monospace;
+    font-size: 9.5pt;
+    color: #b45309;
+}}
+
+.output-body pre {{
+    background: #1f2937;
+    color: #f3f4f6;
+    padding: 14px;
+    border-radius: 6px;
+    overflow-x: auto;
+    font-family: 'SF Mono', Menlo, Monaco, Consolas, monospace;
+    font-size: 9pt;
+    line-height: 1.45;
+}}
+
+.output-body pre code {{
+    background: none;
+    color: inherit;
+    padding: 0;
+}}
+
+.output-body blockquote {{
+    border-left: 3px solid #d1d5db;
+    padding-left: 14px;
+    color: #6b7280;
+    margin: 14px 0;
+}}
+
+.output-body table {{
+    border-collapse: collapse;
+    width: 100%;
+    margin: 14px 0;
+    font-size: 10pt;
+}}
+
+.output-body th, .output-body td {{
+    border: 1px solid #e5e7eb;
+    padding: 8px 12px;
+    text-align: left;
+}}
+
+.output-body th {{
+    background: #f9fafb;
+    font-weight: 600;
+    color: #111827;
+}}
+
+.output-body tr:nth-child(even) {{
+    background: #fafafa;
+}}
+
+.output-body strong {{
+    color: #111827;
+    font-weight: 600;
+}}
+
+.output-body hr {{
+    border: none;
+    border-top: 1px solid #e5e7eb;
+    margin: 24px 0;
+}}
+
+.doc-footer {{
+    margin-top: 40px;
+    padding-top: 16px;
+    border-top: 1px solid #e5e7eb;
+    text-align: center;
+    color: #9ca3af;
+    font-size: 8.5pt;
+    letter-spacing: 0.5px;
+}}
+""")
+
+        HTML(string=html_doc).write_pdf(str(pdf_path), stylesheets=[css])
+        return True
+    except Exception as e:
+        print(f"[artifacts] PDF generation failed: {e}")
+        return False
+
+
+def _escape(text: str) -> str:
+    """Basic HTML escape for plain-text interpolation."""
+    return (
+        text.replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
+            .replace('"', "&quot;")
+    )
