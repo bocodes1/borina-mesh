@@ -19,6 +19,7 @@ import agents.researcher  # noqa
 import agents.trader  # noqa
 import agents.adset  # noqa
 import agents.inbox  # noqa
+import agents.qa_director  # noqa
 
 load_dotenv()
 
