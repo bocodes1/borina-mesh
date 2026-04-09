@@ -64,13 +64,29 @@ class SchedulerService:
 
     def register_defaults(self) -> None:
         """Register the default daily schedules for agents that don't have one yet."""
+        # Master schedule list extracted from the Obsidian vault
+        # (CO_WORKING_SYSTEM.md, automation/docs/ARCHITECTURE.md,
+        # 02-projects/borina-bot.md, 04-resources/skills/self-improvement/CRON-SETUP.md,
+        # 02-projects/refined-concept/gmc-cron-setup.md, and memory reference files).
+        # One default cron per agent — secondary jobs noted in comments.
         DEFAULT_SCHEDULES = {
-            "ceo":               "0 7 * * *",
-            "ecommerce-scout":   "0 8 * * *",
-            "polymarket-intel":  "0 8 * * *",
-            "adset-optimizer":   "0 8 * * *",
-            "trader":            "*/30 * * * *",
-            "inbox-triage":      "0 */2 * * *",
+            # ── Morning routines ───────────────────────────────────────────
+            "ceo":               "0 7 * * *",    # 7 AM daily  — strategic morning briefing (CO_WORKING_SYSTEM.md)
+            "ecommerce-scout":   "0 8 * * *",    # 8 AM daily  — KaloData product discovery (borina-bot.md)
+            "polymarket-intel":  "0 8 * * *",    # 8 AM daily  — leaderboard/whale + signal synthesis (ARCHITECTURE.md)
+            "researcher":        "0 8 * * *",    # 8 AM daily  — morning briefing aggregator (automation_systems.md)
+            # ── Ad operations ──────────────────────────────────────────────
+            # adset-optimizer also owns the 6 PM GMC analytics report and the
+            # 9 AM GMC product-rotation job (gmc-cron-setup.md / ARCHITECTURE.md).
+            "adset-optimizer":   "0 17 * * *",   # 5 PM daily  — GMC ad rotation (ARCHITECTURE.md L241)
+            # ── Continuous monitoring ──────────────────────────────────────
+            # trader also owns: 11 PM daily metrics, 10 PM P&L summary,
+            # 2 PM verification check, 4 PM gym accountability ping.
+            "trader":            "*/30 * * * *", # Every 30 min — bot health watcher (borina-bot.md)
+            "inbox-triage":      "0 */2 * * *",  # Every 2 hours — email/Telegram digest (borina-bot.md)
+            # NOTE: weekly memory curator (Sun 10 AM ET = 14 UTC, CRON-SETUP.md)
+            # and monthly memory archive (1st of month) are not mapped to a
+            # default agent yet — spawn via Memory Curator agent when added.
         }
         from agents.base import registry
         for agent_id, cron in DEFAULT_SCHEDULES.items():

@@ -90,6 +90,18 @@ bash scripts/bootstrap.sh
 
 Open **http://localhost:3000** — dashboard. API docs at **http://localhost:8000/docs**.
 
+### Obsidian Vault Sync (optional)
+
+Borina Mesh can share its `reports/` directory with an Obsidian vault so artifacts sync bidirectionally between your PC and Mac Mini via Obsidian Sync.
+
+1. Set `OBSIDIAN_VAULT_PATH` in `apps/api/.env` to your vault root:
+   - Mac Mini: `/Users/clawd/.openclaw/workspace`
+   - PC: `C:/Users/wenbo/OneDrive/Documents/remote`
+2. Reports produced by agents auto-copy to `{vault}/reports/YYYY-MM-DD/...`.
+3. The dashboard **Files** tab merges the local `reports/` directory with `{vault}/reports/` — newest copy of each file wins when the same artifact exists in both.
+4. Pair this with Obsidian Sync and any report written on the Mac Mini is visible on the PC within seconds (and vice versa).
+
+
 ### Auth modes
 
 Borina Mesh uses the official [Claude Agent SDK](https://github.com/anthropics/claude-agent-sdk), which supports two auth paths:
