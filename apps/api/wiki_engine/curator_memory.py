@@ -85,6 +85,13 @@ when they describe a non-obvious gotcha with a permanent workaround.
 > points for both gain and loss averages. This cost the bot 39 trades
 > effectively flying blind on momentum confirmation.
 
+## Reviewer Rules (v2.1)
+
+- Reviewer must output `subcategory` field in JSON decisions (one of the 13 valid subcategories)
+- Reviewer must APPEND to existing subcategory files, never create new files
+- Every entry has Active/Retired status — new info that supersedes old info should note what it replaces in the reason field
+- The 13 valid subcategory files: trading/strategies, trading/metrics, trading/leaderboard, trading/bot-config, ecommerce/products, ecommerce/campaigns, ecommerce/store, business/decisions, business/finances, infrastructure/services, infrastructure/automation, lessons/technical, lessons/operational
+
 ## Learned Patterns (Appended by Reviewer Over Time)
 
 (Empty on bootstrap. The reviewer will add new patterns here when it makes

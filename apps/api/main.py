@@ -30,9 +30,10 @@ async def lifespan(app: FastAPI):
     print("Borina Mesh starting...")
     init_db()
     try:
-        from wiki_engine.paths import bootstrap_schema_file, ensure_vault_layout
+        from wiki_engine.paths import bootstrap_schema_file, bootstrap_subcategory_files, ensure_vault_layout
         ensure_vault_layout()
         bootstrap_schema_file()
+        bootstrap_subcategory_files()
         # Bootstrap curator memory file too
         from wiki_engine.curator_memory import read_curator_memory
         read_curator_memory()  # side effect: writes initial file if missing

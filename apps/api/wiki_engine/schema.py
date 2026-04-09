@@ -1,4 +1,4 @@
-"""Wiki v2 page schema: 5 categories + frontmatter validation + parse/serialize."""
+"""Wiki v2 page schema: 5 categories + 13 subcategory files + lifecycle management."""
 
 from dataclasses import dataclass, field
 from enum import Enum
@@ -13,6 +13,34 @@ class Category(str, Enum):
     INFRASTRUCTURE = "infrastructure"
     LESSONS = "lessons"
 
+
+# Each category has specific subcategory files. The reviewer must append
+# to the correct file, never create new files outside this list.
+SUBCATEGORY_FILES = {
+    "trading": {
+        "strategies": "trading/strategies.md",
+        "metrics": "trading/metrics.md",
+        "leaderboard": "trading/leaderboard.md",
+        "bot-config": "trading/bot-config.md",
+    },
+    "ecommerce": {
+        "products": "ecommerce/products.md",
+        "campaigns": "ecommerce/campaigns.md",
+        "store": "ecommerce/store.md",
+    },
+    "business": {
+        "decisions": "business/decisions.md",
+        "finances": "business/finances.md",
+    },
+    "infrastructure": {
+        "services": "infrastructure/services.md",
+        "automation": "infrastructure/automation.md",
+    },
+    "lessons": {
+        "technical": "lessons/technical.md",
+        "operational": "lessons/operational.md",
+    },
+}
 
 REQUIRED_FIELDS = {"category", "title", "created", "updated", "confidence"}
 ALLOWED_CONFIDENCE = {"low", "medium", "high", "confirmed"}

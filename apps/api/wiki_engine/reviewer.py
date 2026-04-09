@@ -17,29 +17,44 @@ from wiki_engine.audit import log_approved, log_rejected
 REVIEWER_SYSTEM_PROMPT = """You are the Borina Wiki v2 Reviewer. Your job is to
 decide whether a candidate memory item should be written to the user's vault.
 
-## The 5 Categories
+## The 5 Categories and 13 Subcategory Files
 
-1. **trading** — Polymarket bot strategies, paper-trade results with numbers,
-   whale wallet moves, leaderboard profiles, resolution-rule edges, strategy
-   decisions with money impact.
+You MUST target one of these 13 specific files. NEVER propose creating new files.
+APPEND to existing subcategory files only.
 
-2. **ecommerce** — Refined Concept decisions, KaloData product finds with GMV
-   numbers, Meta Ad Library observations, Google Ads tuning, Shopify insights,
-   competitor teardowns.
+### trading/
+- **strategies** → `trading/strategies.md` — Bot strategies, exit policies, entry rules, signal logic with data
+- **metrics** → `trading/metrics.md` — Paper/live trade performance numbers, win rates, P&L summaries
+- **leaderboard** → `trading/leaderboard.md` — Whale wallet profiles, top trader analysis, copy-trade targets
+- **bot-config** → `trading/bot-config.md` — Bot parameters, thresholds, config values that affect behavior
 
-3. **business** — Money-impact decisions (pricing, budgets, ad spend, pivots)
-   with rationale. Partnerships. Financial facts.
+### ecommerce/
+- **products** → `ecommerce/products.md` — KaloData product finds with GMV numbers, trending items, margin analysis
+- **campaigns** → `ecommerce/campaigns.md` — Meta/Google ad performance, ROAS data, creative observations
+- **store** → `ecommerce/store.md` — Shopify theme decisions, store setup facts, competitor teardowns
 
-4. **infrastructure** — Non-obvious configs: IPs, endpoints, credential
-   locations, cron schedules, service dependencies.
+### business/
+- **decisions** → `business/decisions.md` — Money-impact decisions with rationale (budget shifts, pivots, pricing)
+- **finances** → `business/finances.md` — Financial facts, revenue figures, cost structures
 
-5. **lessons** — Abstracted gotchas with pattern + fix. Things that cost real
-   time or money to learn.
+### infrastructure/
+- **services** → `infrastructure/services.md` — IPs, ports, endpoints, service dependencies, LaunchAgent configs
+- **automation** → `infrastructure/automation.md` — Cron schedules, pipeline configs, automation rules
+
+### lessons/
+- **technical** → `lessons/technical.md` — Code/system gotchas with pattern + fix (things that cost time to learn)
+- **operational** → `lessons/operational.md` — Process/workflow lessons, decision-making gotchas
+
+## Active/Retired Lifecycle
+
+Every entry starts as **ACTIVE**. When new information supersedes an old entry,
+note in the `reason` field what the new info replaces (e.g., "supersedes earlier
+scalp exit policy"). The mutator handles the actual retirement of old entries.
 
 ## Default Decision: REJECT
 
-You MUST default to REJECT unless the content CLEARLY matches one of the five
-categories AND provides signal that is NOT recoverable from git log, CI logs,
+You MUST default to REJECT unless the content CLEARLY matches one of the 13
+subcategories AND provides signal that is NOT recoverable from git log, CI logs,
 code comments, or a 5-minute inspection of the running system.
 
 When in doubt, REJECT.
@@ -65,25 +80,25 @@ You MUST output a single JSON object and nothing else:
 {
   "decision": "approve" | "reject",
   "category": "trading" | "ecommerce" | "business" | "infrastructure" | "lessons" | null,
+  "subcategory": "strategies" | "metrics" | "leaderboard" | "bot-config" | "products" | "campaigns" | "store" | "decisions" | "finances" | "services" | "automation" | "technical" | "operational" | null,
   "reason": "one-sentence rationale",
-  "page": {
-    "slug": "kebab-case-slug",
-    "title": "Human readable title",
-    "confidence": "low" | "medium" | "high" | "confirmed",
-    "body": "# Title\\n\\nMarkdown body with [[wikilinks]] and concrete data."
+  "entry": {
+    "title": "Short descriptive title",
+    "body": "Markdown content with specific data and concrete numbers.",
+    "status": "ACTIVE"
   }
 }
 ```
 
 Rules:
-- If decision is "reject", omit the "page" field and set "category" to null.
-- If decision is "approve", "category" and "page" are required.
-- The page body must be WRITTEN FRESH — not the raw input content. Extract the
-  signal, reshape it into a proper wiki page with a clear title, sections, and
-  cross-references to related pages via [[wikilinks]].
+- If decision is "reject", omit the "entry" field, set "category" and "subcategory" to null.
+- If decision is "approve", "category", "subcategory", and "entry" are all required.
+- The entry body must be WRITTEN FRESH — not the raw input content. Extract the
+  signal, reshape it with concrete data, specific numbers, and dates.
 - Use specific numbers and dates where they exist in the input.
-- NEVER include line numbers, file paths, or commit SHAs in the page body.
+- NEVER include line numbers, file paths, or commit SHAs in the entry body.
 - NEVER approve noise with a "it could be useful later" rationale.
+- APPEND to existing files only — never propose creating new files.
 """
 
 
@@ -166,7 +181,7 @@ async def review_batch(items: list[dict]) -> dict:
                     source=item.get("source", "unknown"),
                 )
             except Exception as e:
-                return {"decision": "reject", "category": None, "reason": f"exception: {e}"}
+                return {"decision": "reject", "category": None, "subcategory": None, "reason": f"exception: {e}"}
 
     results = await asyncio.gather(*[_review(item) for item in items])
 
@@ -175,49 +190,48 @@ async def review_batch(items: list[dict]) -> dict:
     for item, decision in zip(items, results):
         item_id = item.get("id", "unknown")
         if decision.get("decision") == "approve":
-            page = decision.get("page", {})
+            entry = decision.get("entry", {})
             category = decision.get("category")
-            if not page or not category:
+            subcategory = decision.get("subcategory")
+            if not entry or not category or not subcategory:
                 log_rejected(
                     proposal_id=item_id,
-                    reason="approved but missing category or page",
+                    reason="approved but missing category, subcategory, or entry",
                 )
                 summary["rejected"] += 1
                 continue
 
             try:
                 op = EditOp(
-                    action="create",
+                    action="append",
                     category=category,
-                    slug=page.get("slug", "untitled"),
-                    frontmatter={
-                        "category": category,
-                        "title": page.get("title", "Untitled"),
-                        "created": today,
-                        "updated": today,
-                        "confidence": page.get("confidence", "medium"),
-                    },
-                    body=page.get("body", ""),
+                    subcategory=subcategory,
+                    title=entry.get("title", "Untitled"),
+                    body=entry.get("body", ""),
+                    status=entry.get("status", "ACTIVE"),
                 )
                 applied_path = apply_edit(op)
                 log_approved(
                     proposal_id=item_id,
                     reason=decision.get("reason", ""),
                     edits=[{
-                        "action": "create",
+                        "action": "append",
                         "category": category,
-                        "slug": op.slug,
+                        "subcategory": subcategory,
+                        "title": op.title,
                     }],
                 )
                 append_to_log(
-                    f"approved | {item.get('source', '?')} | {category} | "
-                    f"{op.slug} — {decision.get('reason', '')[:60]}"
+                    f"approved | {item.get('source', '?')} | {category}/{subcategory} | "
+                    f"{op.title} — {decision.get('reason', '')[:60]}"
                 )
                 summary["approved"] += 1
                 summary["decisions"].append({
                     "id": item_id,
                     "decision": "approve",
                     "category": category,
+                    "subcategory": subcategory,
+                    "title": op.title,
                     "path": str(applied_path),
                 })
             except Exception as e:
@@ -242,7 +256,7 @@ async def review_batch(items: list[dict]) -> dict:
 
 
 def _reject(reason: str) -> dict:
-    return {"decision": "reject", "category": None, "reason": reason}
+    return {"decision": "reject", "category": None, "subcategory": None, "reason": reason}
 
 
 def _extract_text(message) -> str | None:
@@ -258,14 +272,30 @@ def _extract_text(message) -> str | None:
 
 
 def _extract_json_object(text: str) -> dict | None:
-    """Find the first top-level JSON object in the text."""
-    fenced = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
+    """Find the first top-level JSON object in the text.
+
+    Handles:
+    - ```json\\n{...}\\n```
+    - ```\\n{...}\\n```
+    - Raw {...} (fallback)
+    """
+    # Try fenced code block first (json-tagged or plain)
+    fenced = re.search(r"```(?:json)?\s*\n(\{.*?\})\s*\n```", text, re.DOTALL)
     if fenced:
         try:
             return json.loads(fenced.group(1))
         except json.JSONDecodeError:
             pass
 
+    # Also try single-line fenced (no newline after opening)
+    fenced_inline = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
+    if fenced_inline:
+        try:
+            return json.loads(fenced_inline.group(1))
+        except json.JSONDecodeError:
+            pass
+
+    # Fallback: extract raw JSON object by brace matching
     start = text.find("{")
     if start == -1:
         return None

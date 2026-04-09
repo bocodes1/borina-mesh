@@ -1,4 +1,4 @@
-"""Vault path resolution + directory layout for wiki v2 (5 categories)."""
+"""Vault path resolution + directory layout for wiki v2 (5 categories, 13 subcategory files)."""
 
 import os
 from pathlib import Path
@@ -43,6 +43,67 @@ def ensure_vault_layout(root: Path | None = None) -> Path:
     return root
 
 
+def bootstrap_subcategory_files(root: Path | None = None) -> list[Path]:
+    """Create the 13 subcategory files if they don't exist. Returns list of created paths."""
+    from wiki_engine.schema import SUBCATEGORY_FILES
+
+    try:
+        r = root or vault_root()
+    except RuntimeError:
+        return []
+
+    ensure_vault_layout(r)
+
+    HUMAN_TITLES = {
+        ("trading", "strategies"): "Trading Strategies",
+        ("trading", "metrics"): "Trading Metrics",
+        ("trading", "leaderboard"): "Trader Leaderboard",
+        ("trading", "bot-config"): "Bot Configuration",
+        ("ecommerce", "products"): "Products",
+        ("ecommerce", "campaigns"): "Ad Campaigns",
+        ("ecommerce", "store"): "Store",
+        ("business", "decisions"): "Business Decisions",
+        ("business", "finances"): "Finances",
+        ("infrastructure", "services"): "Services",
+        ("infrastructure", "automation"): "Automation",
+        ("lessons", "technical"): "Technical Lessons",
+        ("lessons", "operational"): "Operational Lessons",
+    }
+
+    created = []
+    for category, subcats in SUBCATEGORY_FILES.items():
+        for subcategory, rel_path in subcats.items():
+            file_path = r / rel_path
+            if not file_path.exists():
+                human_title = HUMAN_TITLES.get((category, subcategory), subcategory.title())
+                template = _subcategory_template(category, subcategory, human_title)
+                file_path.parent.mkdir(parents=True, exist_ok=True)
+                file_path.write_text(template, encoding="utf-8")
+                created.append(file_path)
+
+    return created
+
+
+def _subcategory_template(category: str, subcategory: str, human_title: str) -> str:
+    return f"""---
+category: {category}
+subcategory: {subcategory}
+title: {human_title}
+updated: 2026-04-09
+---
+
+# {human_title}
+
+## Active
+
+(Entries appended here by the reviewer)
+
+## Retired
+
+(Superseded entries moved here with retirement reason)
+"""
+
+
 SCHEMA_TEMPLATE = """---
 category: infrastructure
 title: Borina Wiki Schema
@@ -51,76 +112,72 @@ updated: 2026-04-09
 confidence: high
 ---
 
-# Borina Wiki Schema (v2)
+# Borina Wiki Schema (v2.1)
 
-This file defines the 5 categories and the rules the Reviewer subagent
-follows. The Reviewer reads this before every decision and defaults to
-REJECT unless the content clearly matches a category.
+This file defines the 5 categories, 13 subcategory files, and the rules the
+Reviewer subagent follows. The Reviewer reads this before every decision and
+defaults to REJECT unless the content clearly matches a category.
 
-## The Five Categories
+## The 13 Subcategory Files
 
-### 1. Trading (`trading/`)
-Polymarket bot strategies, paper-trade results with numbers, whale wallet
-moves, leaderboard trader profiles, resolution-rule edges, strategy decisions
-with money impact, lessons from real losses/wins.
+### trading/
+| File | Subcategory | What Goes Here |
+|------|-------------|----------------|
+| `trading/strategies.md` | strategies | Bot strategies, exit policies, entry rules, signal logic with data |
+| `trading/metrics.md` | metrics | Paper/live trade performance numbers, win rates, P&L summaries |
+| `trading/leaderboard.md` | leaderboard | Whale wallet profiles, top trader analysis, copy-trade targets |
+| `trading/bot-config.md` | bot-config | Bot parameters, thresholds, config values that affect behavior |
 
-**Keep:** "Scalp exits cap at 40-50¢ in live trading, ride-winners strategy
-  is the correct exit policy based on 39 trades"
-**Reject:** "bot restarted", "tests passing", "pushed commit to run_bot.py"
+### ecommerce/
+| File | Subcategory | What Goes Here |
+|------|-------------|----------------|
+| `ecommerce/products.md` | products | KaloData product finds with GMV numbers, trending items, margin analysis |
+| `ecommerce/campaigns.md` | campaigns | Meta/Google ad performance, ROAS data, creative observations |
+| `ecommerce/store.md` | store | Shopify theme decisions, store setup facts, competitor teardowns |
 
-### 2. Ecommerce (`ecommerce/`)
-Refined Concept decisions, product scouting finds (KaloData GMV data), Meta
-Ad Library observations, Google Ads performance tuning, Shopify theme
-insights, competitor teardowns, creative/fal.ai wins.
+### business/
+| File | Subcategory | What Goes Here |
+|------|-------------|----------------|
+| `business/decisions.md` | decisions | Money-impact decisions with rationale (budget shifts, pivots, pricing) |
+| `business/finances.md` | finances | Financial facts, revenue figures, cost structures |
 
-**Keep:** "KaloData trending: Italian marble tables at $45K GMV 120% WoW,
-  12 Meta advertisers, margin ~35%"
-**Reject:** "pushed theme update", "deployed to Shopify"
+### infrastructure/
+| File | Subcategory | What Goes Here |
+|------|-------------|----------------|
+| `infrastructure/services.md` | services | IPs, ports, endpoints, service dependencies, LaunchAgent configs |
+| `infrastructure/automation.md` | automation | Cron schedules, pipeline configs, automation rules |
 
-### 3. Business Decisions (`business/`)
-Money-impact decisions (pricing, budget allocation, ad spend shifts,
-strategic pivots) with rationale. Partnership notes. Financial facts.
+### lessons/
+| File | Subcategory | What Goes Here |
+|------|-------------|----------------|
+| `lessons/technical.md` | technical | Code/system gotchas with pattern + fix |
+| `lessons/operational.md` | operational | Process/workflow lessons, decision-making gotchas |
 
-**Keep:** "Shifted $20/day from Meta to Google Shopping because ROAS was
-  3.2x vs 1.4x over 14 days"
-**Reject:** "created spreadsheet", "opened bank app"
+## Entry Format
 
-### 4. Infrastructure (`infrastructure/`)
-Non-obvious configs not recoverable from code: Tailscale IPs, API endpoints,
-credential locations, cron schedules, service dependencies.
+Each entry is appended under a date header:
 
-**Keep:** "Mac Mini Tailscale IP is 100.116.121.128; Borina dashboard on
-  port 3000, API on 8000, Polymarket bot dashboard on 8080"
-**Reject:** "brew install pango", "pip installed weasyprint"
+```markdown
+## YYYY-MM-DD
 
-### 5. Lessons Learned (`lessons/`)
-Abstracted gotchas with the pattern + fix. Things that cost real time/money.
+### Entry Title
 
-**Keep:** "RSI calculations need >=14 candle lookback or they always return
-  -1 -- the lookback window must exceed the RSI period"
-**Reject:** "fixed bug at line 47", "deleted broken function"
+**Status: ACTIVE**
 
-## Page Layout
-
-Every page must have this frontmatter:
-
-```yaml
----
-category: trading | ecommerce | business | infrastructure | lessons
-title: Short descriptive title
-created: YYYY-MM-DD
-updated: YYYY-MM-DD
-confidence: low | medium | high | confirmed
----
+Entry body with concrete data, specific numbers, and dates.
 ```
 
-Followed by markdown body with `[[wikilinks]]` for cross-references to other
-pages.
+## Active/Retired Lifecycle
+
+- Every entry starts as **ACTIVE**
+- When new info supersedes an old entry, the old entry is moved to `## Retired`
+  with a status of `**Status: RETIRED — reason**`
+- The `## Active` and `## Retired` sections are at the bottom of each file
 
 ## Default Decision: REJECT
 
-If content does not clearly match one of the five categories above AND
-provide genuine signal (not recoverable from git/logs/code), REJECT.
+If content does not clearly match one of the 13 subcategories AND provide
+genuine signal (not recoverable from git/logs/code), REJECT.
 """
 
 

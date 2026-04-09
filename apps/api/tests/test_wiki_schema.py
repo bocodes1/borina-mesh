@@ -1,6 +1,7 @@
 import pytest
 from wiki_engine.schema import (
-    Category, validate_frontmatter, parse_page, serialize_page, WikiPage
+    Category, SUBCATEGORY_FILES,
+    validate_frontmatter, parse_page, serialize_page, WikiPage
 )
 
 
@@ -10,6 +11,38 @@ def test_all_five_categories_exist():
     assert Category.BUSINESS.value == "business"
     assert Category.INFRASTRUCTURE.value == "infrastructure"
     assert Category.LESSONS.value == "lessons"
+
+
+def test_subcategory_files_has_13_entries():
+    total = sum(len(v) for v in SUBCATEGORY_FILES.values())
+    assert total == 13, f"Expected 13 subcategory files, got {total}"
+
+
+def test_subcategory_files_trading_keys():
+    assert set(SUBCATEGORY_FILES["trading"].keys()) == {"strategies", "metrics", "leaderboard", "bot-config"}
+
+
+def test_subcategory_files_ecommerce_keys():
+    assert set(SUBCATEGORY_FILES["ecommerce"].keys()) == {"products", "campaigns", "store"}
+
+
+def test_subcategory_files_business_keys():
+    assert set(SUBCATEGORY_FILES["business"].keys()) == {"decisions", "finances"}
+
+
+def test_subcategory_files_infrastructure_keys():
+    assert set(SUBCATEGORY_FILES["infrastructure"].keys()) == {"services", "automation"}
+
+
+def test_subcategory_files_lessons_keys():
+    assert set(SUBCATEGORY_FILES["lessons"].keys()) == {"technical", "operational"}
+
+
+def test_subcategory_files_all_paths_match_category():
+    for category, subcats in SUBCATEGORY_FILES.items():
+        for subcategory, path in subcats.items():
+            assert path.startswith(f"{category}/"), f"Path {path} should start with {category}/"
+            assert path.endswith(".md"), f"Path {path} should end with .md"
 
 
 def test_validate_frontmatter_ok():
