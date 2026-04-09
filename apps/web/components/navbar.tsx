@@ -25,8 +25,7 @@ export function Navbar() {
       animate={{ opacity: 1, y: 0 }}
       className="mb-6 flex items-center justify-between flex-wrap gap-4"
     >
-      <Link href="/" className="flex items-center gap-3">
-        <div className="h-8 w-8 rounded-lg bg-gradient-to-br from-primary to-purple-400 shadow-lg" />
+      <Link href="/" className="flex items-center gap-2">
         <span className="text-xl font-bold tracking-tight">
           Borina
         </span>

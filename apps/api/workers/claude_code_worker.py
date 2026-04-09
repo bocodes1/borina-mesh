@@ -59,10 +59,12 @@ def run_worker_sync(job_id: int, payload: HandoffPayload) -> dict:
     cmd_parts = shlex.split(claude_cmd, posix=False) if " " in claude_cmd else [claude_cmd]
     cmd = cmd_parts + ["-p", task_content, "--output-format", "stream-json"]
 
+    # shell=True on Windows so subprocess can find npm shims like claude.cmd
+    use_shell = os.name == "nt"
     with open(log_path, "w", encoding="utf-8") as logf:
         proc = subprocess.run(
             cmd, cwd=worktree, stdout=logf, stderr=subprocess.STDOUT,
-            timeout=worker_timeout,
+            timeout=worker_timeout, shell=use_shell,
         )
 
     log_tail = "\n".join(log_path.read_text(encoding="utf-8").splitlines()[-30:])
