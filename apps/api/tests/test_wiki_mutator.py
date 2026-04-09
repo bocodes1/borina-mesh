@@ -1,8 +1,6 @@
 import pytest
-import json
 from pathlib import Path
-from wiki_engine.mutator import apply_edit, EditOp
-from wiki_engine.audit import log_approved, log_rejected
+from wiki_engine.mutator import apply_edit, EditOp, append_to_log
 
 
 @pytest.fixture
@@ -11,66 +9,89 @@ def vault(tmp_path, monkeypatch):
     return tmp_path
 
 
-def test_create_entity_page(vault):
+def test_create_trading_page(vault):
     edit = EditOp(
         action="create",
-        page_type="entity",
-        slug="borina-mesh",
+        category="trading",
+        slug="scalp-exit-policy",
         frontmatter={
-            "type": "entity",
-            "status": "active",
+            "category": "trading",
+            "title": "Scalp Exit Policy",
             "created": "2026-04-09",
             "updated": "2026-04-09",
+            "confidence": "high",
         },
-        body="# Borina Mesh\n\nMulti-agent command center.",
+        body="# Scalp Exit Policy\n\nExits cap at 40-50¢ based on 39 live trades.",
     )
     path = apply_edit(edit)
     assert path.exists()
     content = path.read_text(encoding="utf-8")
-    assert "type: entity" in content
-    assert "# Borina Mesh" in content
+    assert "category: trading" in content
+    assert "Scalp Exit Policy" in content
 
 
-def test_append_to_existing(vault):
-    entity_dir = vault / "entities"
-    entity_dir.mkdir(parents=True)
-    (entity_dir / "test.md").write_text(
-        "---\ntype: entity\nstatus: active\ncreated: 2026-04-09\nupdated: 2026-04-09\n---\n\n# Test\n\nOriginal.\n",
-        encoding="utf-8"
-    )
+def test_create_in_each_category(vault):
+    for category in ["trading", "ecommerce", "business", "infrastructure", "lessons"]:
+        edit = EditOp(
+            action="create",
+            category=category,
+            slug=f"test-{category}",
+            frontmatter={
+                "category": category,
+                "title": f"Test {category}",
+                "created": "2026-04-09",
+                "updated": "2026-04-09",
+                "confidence": "medium",
+            },
+            body=f"# Test {category}\n\nContent.",
+        )
+        path = apply_edit(edit)
+        assert path.exists()
+        assert category in str(path)
 
-    edit = EditOp(
+
+def test_append_to_existing_page(vault):
+    # Create first
+    apply_edit(EditOp(
+        action="create",
+        category="trading",
+        slug="test",
+        frontmatter={
+            "category": "trading",
+            "title": "Test",
+            "created": "2026-04-09",
+            "updated": "2026-04-09",
+            "confidence": "medium",
+        },
+        body="# Test\n\nOriginal body.",
+    ))
+
+    # Append
+    path = apply_edit(EditOp(
         action="append",
-        page_type="entity",
+        category="trading",
         slug="test",
         frontmatter={},
-        body="\n## Update\n\nNew info appended.\n",
-    )
-    path = apply_edit(edit)
+        body="## Update\n\nNew insight added.",
+    ))
     content = path.read_text(encoding="utf-8")
-    assert "Original." in content
-    assert "New info appended." in content
+    assert "Original body." in content
+    assert "New insight added." in content
 
 
-def test_log_approved_writes_jsonl(vault):
-    log_approved(
-        proposal_id="abc123",
-        reason="valuable decision record",
-        edits=[{"action": "create", "page_type": "decision", "slug": "test"}],
-    )
-    log_file = vault / "_queue" / "approved.jsonl"
-    assert log_file.exists()
-    line = log_file.read_text(encoding="utf-8").strip()
-    record = json.loads(line)
-    assert record["proposal_id"] == "abc123"
+def test_unknown_category_raises(vault):
+    with pytest.raises(ValueError, match="unknown category"):
+        apply_edit(EditOp(
+            action="create",
+            category="politics",
+            slug="test",
+            frontmatter={},
+            body="",
+        ))
 
 
-def test_log_rejected_writes_jsonl(vault):
-    log_rejected(
-        proposal_id="def456",
-        reason="routine session log, no signal",
-    )
-    log_file = vault / "_queue" / "rejected.jsonl"
-    assert log_file.exists()
-    record = json.loads(log_file.read_text(encoding="utf-8").strip())
-    assert record["proposal_id"] == "def456"
+def test_append_to_log(vault):
+    append_to_log("test message")
+    log = (vault / "log.md").read_text(encoding="utf-8")
+    assert "test message" in log
+    assert "Activity Log" in log

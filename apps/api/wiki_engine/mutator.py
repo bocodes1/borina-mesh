@@ -1,4 +1,4 @@
-"""Apply approved edits to wiki files."""
+"""Apply approved edits to wiki v2 category directories."""
 
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -7,41 +7,42 @@ from typing import Any
 
 from wiki_engine.paths import (
     vault_root, ensure_vault_layout,
-    ENTITIES_DIR, CONCEPTS_DIR, DECISIONS_DIR, SOURCES_DIR,
-    INDEX_FILE, LOG_FILE,
+    TRADING_DIR, ECOMMERCE_DIR, BUSINESS_DIR, INFRASTRUCTURE_DIR, LESSONS_DIR,
+    LOG_FILE,
 )
 from wiki_engine.schema import parse_page, serialize_page, WikiPage
 
 
-DIR_BY_TYPE = {
-    "entity": ENTITIES_DIR,
-    "concept": CONCEPTS_DIR,
-    "decision": DECISIONS_DIR,
-    "source": SOURCES_DIR,
+DIR_BY_CATEGORY = {
+    "trading": TRADING_DIR,
+    "ecommerce": ECOMMERCE_DIR,
+    "business": BUSINESS_DIR,
+    "infrastructure": INFRASTRUCTURE_DIR,
+    "lessons": LESSONS_DIR,
 }
 
 
 @dataclass
 class EditOp:
-    action: str          # "create", "append", "update_frontmatter"
-    page_type: str       # entity | concept | decision | source
-    slug: str            # e.g. "borina-mesh"
+    action: str          # "create" | "append"
+    category: str        # one of the 5 categories
+    slug: str            # kebab-case slug
     frontmatter: dict[str, Any] = field(default_factory=dict)
     body: str = ""
 
 
-def _page_path(page_type: str, slug: str) -> Path:
+def _page_path(category: str, slug: str) -> Path:
     root = ensure_vault_layout()
-    sub = DIR_BY_TYPE.get(page_type)
+    sub = DIR_BY_CATEGORY.get(category)
     if sub is None:
-        raise ValueError(f"unknown page type: {page_type}")
-    safe_slug = slug.strip().lower().replace(" ", "-")
+        raise ValueError(f"unknown category: {category}")
+    safe_slug = slug.strip().lower().replace(" ", "-").replace("/", "-")
     return root / sub / f"{safe_slug}.md"
 
 
 def apply_edit(edit: EditOp) -> Path:
     """Apply a single edit op to the wiki. Returns the affected file path."""
-    path = _page_path(edit.page_type, edit.slug)
+    path = _page_path(edit.category, edit.slug)
     path.parent.mkdir(parents=True, exist_ok=True)
 
     if edit.action == "create":
@@ -50,24 +51,17 @@ def apply_edit(edit: EditOp) -> Path:
     elif edit.action == "append":
         if path.exists():
             current = parse_page(path.read_text(encoding="utf-8"))
-            current.body = (current.body.rstrip() + "\n" + edit.body).lstrip()
+            current.body = (current.body.rstrip() + "\n\n" + edit.body).lstrip()
+            current.frontmatter["updated"] = datetime.utcnow().strftime("%Y-%m-%d")
             if edit.frontmatter:
-                current.frontmatter.update(edit.frontmatter)
-            # Bump updated timestamp if the page has one
-            if "updated" in current.frontmatter:
-                current.frontmatter["updated"] = datetime.utcnow().strftime("%Y-%m-%d")
+                for k, v in edit.frontmatter.items():
+                    if k != "created":
+                        current.frontmatter[k] = v
             path.write_text(serialize_page(current), encoding="utf-8")
         else:
-            # Treat append-to-missing as create
+            # Append-to-missing == create
             page = WikiPage(frontmatter=edit.frontmatter, body=edit.body)
             path.write_text(serialize_page(page), encoding="utf-8")
-    elif edit.action == "update_frontmatter":
-        if path.exists():
-            current = parse_page(path.read_text(encoding="utf-8"))
-            current.frontmatter.update(edit.frontmatter)
-            if "updated" in current.frontmatter:
-                current.frontmatter["updated"] = datetime.utcnow().strftime("%Y-%m-%d")
-            path.write_text(serialize_page(current), encoding="utf-8")
     else:
         raise ValueError(f"unknown action: {edit.action}")
 
@@ -79,7 +73,7 @@ def append_to_log(message: str) -> None:
     root = ensure_vault_layout()
     log_path = root / LOG_FILE
     ts = datetime.utcnow().strftime("%Y-%m-%d %H:%M")
-    line = f"## [{ts}] {message}\n"
+    line = f"- [{ts}] {message}\n"
     if log_path.exists():
         log_path.write_text(log_path.read_text(encoding="utf-8").rstrip() + "\n" + line, encoding="utf-8")
     else:
