@@ -5,7 +5,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from wiki_engine.paths import ensure_vault_layout, APPROVED_JSONL, REJECTED_JSONL
+from wiki_engine.paths import ensure_vault_layout, REJECTED_JSONL
+
+APPROVED_JSONL = "_queue/approved.jsonl"
 
 
 def log_approved(proposal_id: str, reason: str, edits: list[dict[str, Any]]) -> None:

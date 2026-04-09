@@ -1,35 +1,47 @@
-"""Wiki engine HTTP routes."""
+"""Wiki engine HTTP routes (v2)."""
 
+import uuid
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-from wiki_engine.queue import enqueue_proposal, list_pending
 from wiki_engine.paths import vault_root
+from wiki_engine.reviewer import review_batch
 
 
 router = APIRouter(tags=["wiki"])
 
 
-class ProposalIn(BaseModel):
-    source: str = Field(..., min_length=1)
-    agent_id: str = Field(..., min_length=1)
-    prompt: str = Field(..., min_length=1)
+class CandidateItem(BaseModel):
     content: str = Field(..., min_length=1)
+    prompt: str = Field(default="")
+    source: str = Field(default="unknown")
+
+
+class ProposeBody(BaseModel):
+    items: list[CandidateItem] = Field(..., min_length=1)
+    source: str = Field(default="claude-code")
 
 
 @router.post("/memory/propose")
-async def propose_memory(body: ProposalIn):
-    """Submit a proposal to be reviewed. Returns queued id."""
+async def propose_memory(body: ProposeBody):
+    """Submit a batch of candidate memory items. The reviewer runs
+    synchronously and returns the decision summary."""
     try:
-        pid = enqueue_proposal(
-            source=body.source,
-            agent_id=body.agent_id,
-            prompt=body.prompt,
-            content=body.content,
-        )
+        vault_root()
     except RuntimeError as e:
         raise HTTPException(status_code=503, detail=str(e))
-    return {"id": pid, "queued": True}
+
+    items = []
+    for candidate in body.items:
+        items.append({
+            "id": str(uuid.uuid4())[:12],
+            "content": candidate.content,
+            "prompt": candidate.prompt,
+            "source": candidate.source or body.source,
+        })
+
+    summary = await review_batch(items)
+    return summary
 
 
 @router.get("/wiki/status")
@@ -38,23 +50,17 @@ async def wiki_status():
     try:
         root = vault_root()
     except RuntimeError:
-        return {"vault_root": None, "pending_count": 0, "configured": False}
-
-    pending = list_pending()
+        return {"configured": False}
     return {
         "configured": True,
         "vault_root": str(root),
-        "pending_count": len(pending),
-        "pending_sample": [
-            {"id": p.id, "source": p.source, "agent_id": p.agent_id}
-            for p in pending[:5]
-        ],
+        "version": "v2",
     }
 
 
-@router.post("/wiki/review")
-async def trigger_review(max_items: int = 20):
-    """Manually trigger a batch review run."""
-    from wiki_engine.reviewer import process_pending
-    summary = await process_pending(max_items=max_items)
-    return summary
+@router.post("/wiki/digest")
+async def send_daily_digest():
+    """Send today's rejection digest to Telegram."""
+    from wiki_engine.digest import send_daily_digest
+    count = await send_daily_digest()
+    return {"sent": True, "rejections_included": count}
