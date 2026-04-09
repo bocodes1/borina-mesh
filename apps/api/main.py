@@ -29,6 +29,17 @@ async def lifespan(app: FastAPI):
     """App startup/shutdown lifecycle."""
     print("Borina Mesh starting...")
     init_db()
+    try:
+        from wiki_engine.paths import bootstrap_schema_file, ensure_vault_layout
+        ensure_vault_layout()
+        bootstrap_schema_file()
+        # Bootstrap curator memory file too
+        from wiki_engine.curator_memory import read_curator_memory
+        read_curator_memory()  # side effect: writes initial file if missing
+    except RuntimeError:
+        print("[wiki] OBSIDIAN_VAULT_PATH not set — wiki engine disabled")
+    except Exception as e:
+        print(f"[wiki] bootstrap error: {e}")
     scheduler_service.start()
     scheduler_service.register_defaults()
     yield
