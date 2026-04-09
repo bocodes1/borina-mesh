@@ -18,7 +18,6 @@ class InboxTriageAgent(Agent):
 Output: triage report to reports/{today}/inbox-triage.md + Telegram digest.
 Do NOT send any messages automatically. All replies require user approval."""
     tools = ["read_file", "write_file"]
-    model = "claude-opus-4-6"
 
 
 registry.register(InboxTriageAgent)

@@ -5,11 +5,16 @@ AGENT_MODELS: dict[str, str] = {
     "ceo":         "claude-opus-4-6",
     "researcher":  "claude-opus-4-6",
     "scout":       "claude-opus-4-6",
+    "ecommerce-scout": "claude-opus-4-6",
     "polymarket":  "claude-opus-4-6",
+    "polymarket-intel": "claude-opus-4-6",
     "qa_director": "claude-opus-4-6",
     "trader":      "claude-sonnet-4-6",
     "adset":       "claude-sonnet-4-6",
+    "adset-optimizer": "claude-sonnet-4-6",
     "inbox":       "claude-haiku-4-5-20251001",
+    "inbox-triage": "claude-haiku-4-5-20251001",
+    "fake":        "claude-opus-4-6",  # for testing
 }
 
 def resolve_model(agent_id: str) -> str:

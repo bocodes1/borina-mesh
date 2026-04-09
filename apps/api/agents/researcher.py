@@ -20,7 +20,6 @@ class ResearcherAgent(Agent):
 When the user gives you a topic, ask clarifying questions if scope is unclear.
 When scope is clear, proceed autonomously through the pipeline."""
     tools = ["web_fetch", "web_search", "read_file", "write_file"]
-    model = "claude-opus-4-6"
 
 
 registry.register(ResearcherAgent)

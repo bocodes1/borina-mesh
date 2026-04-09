@@ -19,7 +19,6 @@ class AdsetOptimizerAgent(Agent):
 Do NOT auto-execute changes. Human approves all ad modifications.
 Output to reports/{today}/adset-report.md."""
     tools = ["read_file", "write_file"]
-    model = "claude-opus-4-6"
 
 
 registry.register(AdsetOptimizerAgent)

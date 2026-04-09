@@ -21,7 +21,6 @@ Be specific: product name, supplier price estimate, retail range, margin %, comp
 Flag anything oversaturated (50+ active advertisers) as LOW viability.
 When done, close all tabs and stop."""
     tools = ["computer_use", "read_file", "write_file"]
-    model = "claude-opus-4-6"
 
     async def stream(self, prompt: str, job_id: int | None = None) -> AsyncIterator[dict]:
         """Override: Scout uses Computer Use, not the standard SDK path."""

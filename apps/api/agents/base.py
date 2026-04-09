@@ -15,7 +15,11 @@ class Agent:
     tagline: ClassVar[str] = ""
     system_prompt: ClassVar[str] = ""
     tools: ClassVar[list[str]] = []
-    model: ClassVar[str] = "claude-opus-4-6"
+
+    @property
+    def model(self) -> str:
+        from agents.models import resolve_model
+        return resolve_model(self.id)
 
     def to_dict(self) -> dict:
         return {

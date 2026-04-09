@@ -18,7 +18,6 @@ class PolymarketIntelAgent(Agent):
 
 Output: PDF report to reports/{today}/polymarket-intel.pdf + Telegram summary."""
     tools = ["web_fetch", "read_file", "write_file"]
-    model = "claude-opus-4-6"
 
 
 registry.register(PolymarketIntelAgent)

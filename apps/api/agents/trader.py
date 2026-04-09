@@ -21,7 +21,6 @@ Check trade journal at reports/trade-journal/*.json for pattern detection.
 
 Output: daily briefing to reports/{today}/trader-briefing.md + Telegram alert on RED issues."""
     tools = ["web_fetch", "read_file", "write_file"]
-    model = "claude-opus-4-6"
 
 
 registry.register(TraderAgent)
