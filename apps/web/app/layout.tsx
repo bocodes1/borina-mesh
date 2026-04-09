@@ -7,7 +7,7 @@ import { ToastListener } from "@/components/toast-listener";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Borina Mesh",
+  title: "Borina",
   description: "Multi-agent command center",
 };
 

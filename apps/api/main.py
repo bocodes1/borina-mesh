@@ -29,13 +29,14 @@ async def lifespan(app: FastAPI):
     print("Borina Mesh starting...")
     init_db()
     scheduler_service.start()
+    scheduler_service.register_defaults()
     yield
     scheduler_service.stop()
     print("Borina Mesh shutting down...")
 
 
 app = FastAPI(
-    title="Borina Mesh",
+    title="Borina",
     description="Multi-agent command center",
     version="0.1.0",
     lifespan=lifespan,

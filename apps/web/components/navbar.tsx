@@ -26,7 +26,7 @@ export function Navbar() {
       <Link href="/" className="flex items-center gap-3">
         <div className="h-8 w-8 rounded-lg bg-gradient-to-br from-primary to-purple-400 shadow-lg" />
         <span className="text-xl font-bold tracking-tight">
-          Borina <span className="text-primary">Mesh</span>
+          Borina
         </span>
       </Link>
 

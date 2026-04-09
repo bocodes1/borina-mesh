@@ -62,6 +62,28 @@ class SchedulerService:
     def list_schedules(self) -> dict[str, str]:
         return dict(self._schedules)
 
+    def register_defaults(self) -> None:
+        """Register the default daily schedules for agents that don't have one yet."""
+        DEFAULT_SCHEDULES = {
+            "ceo":               "0 7 * * *",
+            "ecommerce-scout":   "0 8 * * *",
+            "polymarket-intel":  "0 8 * * *",
+            "adset-optimizer":   "0 8 * * *",
+            "trader":            "*/30 * * * *",
+            "inbox-triage":      "0 */2 * * *",
+        }
+        from agents.base import registry
+        for agent_id, cron in DEFAULT_SCHEDULES.items():
+            if not registry.get(agent_id):
+                continue
+            if agent_id in self._schedules:
+                continue
+            try:
+                self.set_schedule(agent_id, cron)
+                print(f"[scheduler] Registered default: {agent_id} @ {cron}")
+            except Exception as e:
+                print(f"[scheduler] Failed to register {agent_id}: {e}")
+
     async def _run_agent(self, agent_id: str) -> None:
         """Execute an agent's scheduled run."""
         from agents.base import registry
