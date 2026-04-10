@@ -32,3 +32,12 @@ export interface MorningBrief {
   total_cost_usd: number;
   created_at: string;
 }
+
+export interface ChatMessage {
+  id: number;
+  agent_id: string;
+  role: "user" | "assistant";
+  content: string;
+  job_id: number | null;
+  created_at: string;
+}

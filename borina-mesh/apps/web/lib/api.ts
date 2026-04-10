@@ -1,4 +1,4 @@
-import type { Agent, Job, MorningBrief } from "./types";
+import type { Agent, Job, MorningBrief, ChatMessage } from "./types";
 
 const API_BASE = "/api"; // proxied to backend via next.config.js
 
@@ -30,4 +30,10 @@ export const api = {
   listBriefs: (limit = 14) => fetchJSON<MorningBrief[]>(`/briefs?limit=${limit}`),
   generateBrief: () =>
     fetchJSON<MorningBrief>("/briefs/generate", { method: "POST" }),
+  getThread: (agentId: string, limit = 100) =>
+    fetchJSON<ChatMessage[]>(`/threads/${agentId}?limit=${limit}`),
+  clearThread: (agentId: string) =>
+    fetchJSON<{ agent_id: string; deleted: number }>(`/threads/${agentId}`, {
+      method: "DELETE",
+    }),
 };
