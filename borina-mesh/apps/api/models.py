@@ -43,3 +43,14 @@ class AgentConfig(SQLModel, table=True):
     enabled: bool = True
     schedule_cron: Optional[str] = None
     last_run_at: Optional[datetime] = None
+
+
+class MorningBrief(SQLModel, table=True):
+    """Daily morning brief synthesized by CEO agent."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    date: str = Field(index=True, sa_column_kwargs={"unique": True})
+    summary: str = ""
+    cost_summary: str = ""
+    total_runs: int = 0
+    total_cost_usd: float = 0.0
+    created_at: datetime = Field(default_factory=datetime.utcnow)
