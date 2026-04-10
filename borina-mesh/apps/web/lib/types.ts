@@ -41,3 +41,25 @@ export interface ChatMessage {
   job_id: number | null;
   created_at: string;
 }
+
+export interface AgentTask {
+  id: number;
+  title: string;
+  description: string;
+  assigned_agent: string | null;
+  status: "backlog" | "assigned" | "in_progress" | "review" | "done";
+  priority: "low" | "medium" | "high" | "critical";
+  input_data: string | null;
+  output_data: string | null;
+  created_at: string;
+  completed_at: string | null;
+}
+
+export interface WorkspaceEntry {
+  id: number;
+  workspace_id: string;
+  agent_id: string;
+  key: string;
+  value: string;
+  created_at: string;
+}
