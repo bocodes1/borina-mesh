@@ -1,4 +1,4 @@
-"""Apply approved edits to wiki v2 subcategory files with lifecycle management."""
+"""Apply approved edits to wiki v3 — individual pages per entry + category index hubs."""
 
 import re
 from dataclasses import dataclass, field
@@ -27,16 +27,50 @@ class EditOp:
     frontmatter: dict[str, Any] = field(default_factory=dict)
 
 
+def _make_slug(title: str, existing_slugs: set[str] | None = None) -> str:
+    """Convert a title to a kebab-case slug, max 50 chars, deduped."""
+    # lowercase, replace non-alphanumeric with hyphens
+    slug = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")
+    slug = slug[:50].rstrip("-")
+    if not slug:
+        slug = "untitled"
+    if existing_slugs is None:
+        return slug
+    # deduplicate
+    candidate = slug
+    n = 2
+    while candidate in existing_slugs:
+        suffix = f"-{n}"
+        candidate = slug[: 50 - len(suffix)] + suffix
+        n += 1
+    return candidate
+
+
+def _category_dir(category: str) -> str:
+    """Map category name to directory name (they're the same in v3)."""
+    dirs = {
+        "trading": "trading",
+        "ecommerce": "ecommerce",
+        "business": "business",
+        "infrastructure": "infrastructure",
+        "lessons": "lessons",
+    }
+    if category not in dirs:
+        raise ValueError(f"unknown category: {category}")
+    return dirs[category]
+
+
 def _subcategory_path(category: str, subcategory: str) -> Path:
-    """Resolve the file path for a given category + subcategory."""
+    """Resolve the _index.md path for a given category (v3: all writes go to individual pages)."""
     root = ensure_vault_layout()
     cat_files = SUBCATEGORY_FILES.get(category)
     if cat_files is None:
         raise ValueError(f"unknown category: {category}")
-    rel_path = cat_files.get(subcategory)
-    if rel_path is None:
+    if subcategory not in cat_files:
         raise ValueError(f"unknown subcategory '{subcategory}' for category '{category}'")
-    return root / rel_path
+    # Return the category _index.md path (used for backwards-compat checks)
+    cat_dir = _category_dir(category)
+    return root / cat_dir / "_index.md"
 
 
 def _find_active_section_end(lines: list[str]) -> int:
@@ -47,7 +81,6 @@ def _find_active_section_end(lines: list[str]) -> int:
             retired_idx = i
             break
     if retired_idx is not None:
-        # Insert before the ## Retired section (with blank line)
         return retired_idx
     return len(lines)
 
@@ -68,8 +101,68 @@ def _build_entry(title: str, body: str, status: str, retire_reason: str = "") ->
     return "\n".join(lines)
 
 
+def _build_individual_page(
+    category: str,
+    subcategory: str,
+    title: str,
+    body: str,
+    status: str,
+    created: str,
+    updated: str,
+) -> str:
+    """Build a complete individual page with frontmatter, content, and Related section."""
+    status_lower = status.lower()
+    fm_lines = [
+        "---",
+        f"category: {category}",
+        f'title: "{title}"',
+        f"status: {status_lower}",
+        f"created: {created}",
+        f"updated: {updated}",
+        "---",
+        "",
+        f"# {title}",
+        "",
+        f"**Status: {status}** | Created: {created}",
+        "",
+    ]
+    if body.strip():
+        fm_lines.append(body.strip())
+        fm_lines.append("")
+    fm_lines.extend([
+        "---",
+        "## Related",
+        f"- [[{category}/_index|{category.title()} Hub]]",
+        "",
+    ])
+    return "\n".join(fm_lines)
+
+
+def _update_category_index(root: Path, category: str, slug: str, title: str) -> None:
+    """Append a [[wikilink]] to the category _index.md for the new page."""
+    index_path = root / _category_dir(category) / "_index.md"
+    if not index_path.exists():
+        return
+    content = index_path.read_text(encoding="utf-8")
+    link = f"- [[{category}/{slug}|{title}]]"
+    # Insert before "## Related Categories" if present, else append
+    if "## Related Categories" in content:
+        content = content.replace(
+            "## Related Categories",
+            f"{link}\n\n## Related Categories",
+        )
+    else:
+        content = content.rstrip() + f"\n{link}\n"
+    index_path.write_text(content, encoding="utf-8")
+
+
 def apply_edit(edit: EditOp) -> Path:
-    """Apply a single edit op to the wiki. Returns the affected file path."""
+    """Apply a single edit op to the wiki. Returns the affected file path.
+
+    v3 behaviour for action="append":
+    - Creates a new individual .md file at {category}/{slug}.md
+    - Updates the category _index.md with a new [[wikilink]]
+    """
 
     # Handle legacy "create" action for backward compatibility
     if edit.action == "create":
@@ -84,127 +177,89 @@ def apply_edit(edit: EditOp) -> Path:
 
 
 def _apply_append(edit: EditOp) -> Path:
-    """Append an entry under today's date header in the Active section."""
-    path = _subcategory_path(edit.category, edit.subcategory)
-    path.parent.mkdir(parents=True, exist_ok=True)
+    """Create a new individual page file for the entry (v3 behaviour)."""
+    # Validate category + subcategory
+    cat_files = SUBCATEGORY_FILES.get(edit.category)
+    if cat_files is None:
+        raise ValueError(f"unknown category: {edit.category}")
+    if edit.subcategory not in cat_files:
+        raise ValueError(f"unknown subcategory '{edit.subcategory}' for category '{edit.category}'")
+
+    root = ensure_vault_layout()
+    cat_dir = _category_dir(edit.category)
+    category_path = root / cat_dir
+    category_path.mkdir(parents=True, exist_ok=True)
+
+    # Collect existing slugs in this category dir to avoid collisions
+    existing_slugs = {p.stem for p in category_path.glob("*.md") if p.stem != "_index"}
+    slug = _make_slug(edit.title, existing_slugs)
 
     today = date.today().isoformat()
-    date_header = f"## {today}"
-    entry_block = _build_entry(edit.title, edit.body, edit.status, edit.retire_reason)
+    page_path = category_path / f"{slug}.md"
 
-    if not path.exists():
-        raise FileNotFoundError(
-            f"Subcategory file does not exist: {path}. "
-            "Run bootstrap_subcategory_files() first."
-        )
+    page_content = _build_individual_page(
+        category=edit.category,
+        subcategory=edit.subcategory,
+        title=edit.title,
+        body=edit.body,
+        status=edit.status,
+        created=today,
+        updated=today,
+    )
+    page_path.write_text(page_content, encoding="utf-8")
 
-    content = path.read_text(encoding="utf-8")
-    lines = content.splitlines(keepends=True)
+    # Update the category _index.md
+    _update_category_index(root, edit.category, slug, edit.title)
 
-    # Find the ## Active section
-    active_section_idx = None
-    for i, line in enumerate(lines):
-        if line.strip() == "## Active":
-            active_section_idx = i
-            break
-
-    if active_section_idx is None:
-        # No ## Active section found — just append at end before ## Retired
-        retired_idx = None
-        for i, line in enumerate(lines):
-            if line.strip() == "## Retired":
-                retired_idx = i
-                break
-        insert_at = retired_idx if retired_idx is not None else len(lines)
-    else:
-        # Look for today's date header within the Active section
-        insert_at = None
-        retired_idx = None
-        for i in range(active_section_idx + 1, len(lines)):
-            if lines[i].strip() == "## Retired":
-                retired_idx = i
-                break
-            if lines[i].strip() == date_header:
-                # Found today's date header — insert after it (and any blank lines)
-                j = i + 1
-                while j < len(lines) and lines[j].strip() == "":
-                    j += 1
-                insert_at = j
-                break
-        if insert_at is None:
-            # No date header for today — insert one right after ## Active
-            insert_at = active_section_idx + 1
-            entry_block = f"\n{date_header}\n\n{entry_block}"
-
-    # Build new content
-    before = "".join(lines[:insert_at])
-    after = "".join(lines[insert_at:])
-
-    if insert_at == active_section_idx + 1 and entry_block.startswith(f"\n{date_header}"):
-        # Already prefixed with date header
-        new_content = before + entry_block + "\n" + after
-    else:
-        new_content = before + entry_block + "\n" + after
-
-    # Update frontmatter updated date if present
-    new_content = _update_frontmatter_date(new_content, today)
-    path.write_text(new_content, encoding="utf-8")
-    return path
+    return page_path
 
 
 def _apply_retire(edit: EditOp) -> Path:
-    """Find an entry by title, mark it RETIRED, move to ## Retired section."""
-    path = _subcategory_path(edit.category, edit.subcategory)
-    if not path.exists():
-        raise FileNotFoundError(f"Subcategory file does not exist: {path}")
+    """Find a page by title slug, mark it RETIRED in its frontmatter."""
+    # Validate
+    cat_files = SUBCATEGORY_FILES.get(edit.category)
+    if cat_files is None:
+        raise ValueError(f"unknown category: {edit.category}")
+    if edit.subcategory not in cat_files:
+        raise ValueError(f"unknown subcategory '{edit.subcategory}' for category '{edit.category}'")
 
-    content = path.read_text(encoding="utf-8")
-    title_pattern = re.compile(r"^### " + re.escape(edit.title) + r"\s*$", re.MULTILINE)
-    match = title_pattern.search(content)
-    if not match:
-        raise ValueError(f"Entry titled '{edit.title}' not found in {path}")
+    root = ensure_vault_layout()
+    cat_dir = _category_dir(edit.category)
+    category_path = root / cat_dir
 
-    # Find the entry block: from ### Title to next ### or ## or end
-    entry_start = match.start()
-    rest = content[entry_start:]
-    # Find end of this entry
-    next_section = re.search(r"\n(?:#{2,3} )", rest[1:])
-    if next_section:
-        entry_end = entry_start + 1 + next_section.start()
-    else:
-        entry_end = len(content)
+    # Find the page by matching title in frontmatter or H1
+    target_path = None
+    for md_file in category_path.glob("*.md"):
+        if md_file.stem == "_index":
+            continue
+        content = md_file.read_text(encoding="utf-8")
+        # Check frontmatter title or H1 heading
+        if f'title: "{edit.title}"' in content or f"# {edit.title}" in content:
+            target_path = md_file
+            break
 
-    entry_block = content[entry_start:entry_end]
+    if target_path is None:
+        raise ValueError(f"Entry titled '{edit.title}' not found in {category_path}")
 
-    # Replace ACTIVE status with RETIRED in the entry block
-    retired_block = re.sub(
-        r"\*\*Status: ACTIVE\*\*",
-        f"**Status: RETIRED — {edit.retire_reason}**" if edit.retire_reason else "**Status: RETIRED**",
-        entry_block,
-    )
-
-    # Remove from original location
-    content_without_entry = content[:entry_start] + content[entry_end:]
-    content_without_entry = content_without_entry.rstrip() + "\n"
-
-    # Find or create ## Retired section
-    retired_section_match = re.search(r"^## Retired\s*$", content_without_entry, re.MULTILINE)
-    if retired_section_match:
-        insert_pos = retired_section_match.end()
-        new_content = (
-            content_without_entry[:insert_pos]
-            + "\n\n"
-            + retired_block.strip()
-            + "\n"
-            + content_without_entry[insert_pos:]
-        )
-    else:
-        new_content = content_without_entry.rstrip() + "\n\n## Retired\n\n" + retired_block.strip() + "\n"
-
+    content = target_path.read_text(encoding="utf-8")
     today = date.today().isoformat()
-    new_content = _update_frontmatter_date(new_content, today)
-    path.write_text(new_content, encoding="utf-8")
-    return path
+
+    # Update status in frontmatter
+    if edit.retire_reason:
+        retired_status = f"RETIRED — {edit.retire_reason}"
+    else:
+        retired_status = "RETIRED"
+
+    content = re.sub(r"^status: \w+", f"status: retired", content, flags=re.MULTILINE)
+    content = re.sub(r"^updated:.*$", f"updated: {today}", content, flags=re.MULTILINE)
+    # Update the Status line in the body
+    content = re.sub(
+        r"\*\*Status: ACTIVE\*\*",
+        f"**Status: {retired_status}**",
+        content,
+    )
+    target_path.write_text(content, encoding="utf-8")
+    return target_path
 
 
 def _update_frontmatter_date(content: str, today: str) -> str:

@@ -8,27 +8,38 @@ from wiki_engine.paths import bootstrap_subcategory_files
 def vault(tmp_path, monkeypatch):
     monkeypatch.setenv("OBSIDIAN_VAULT_PATH", str(tmp_path))
     bootstrap_subcategory_files(tmp_path)
+    # Create _index.md files for each category (v3 requirement)
+    for cat in ["trading", "ecommerce", "business", "infrastructure", "lessons"]:
+        index = tmp_path / cat / "_index.md"
+        index.write_text(
+            f"---\ncategory: {cat}\ntitle: {cat.title()}\ntype: index\n---\n\n# {cat.title()}\n\n## Related Categories\n",
+            encoding="utf-8",
+        )
     return tmp_path
 
 
-def test_append_to_strategies(vault):
+def test_append_creates_individual_page(vault):
+    """v3: append creates a new individual .md file, not appending to mega file."""
     edit = EditOp(
         action="append",
         category="trading",
         subcategory="strategies",
         title="Ride-Winners Exit Policy",
-        body="Hold if contract >= 65¢ OR momentum confirms. Exit when drops 6¢ from peak AND momentum reverses. Based on 39 live trades.",
+        body="Hold if contract >= 65c OR momentum confirms. Exit when drops 6c from peak AND momentum reverses. Based on 39 live trades.",
         status="ACTIVE",
     )
     path = apply_edit(edit)
     assert path.exists()
+    # Should be an individual file, not strategies.md
+    assert path.name != "strategies.md"
+    assert path.name.endswith(".md")
     content = path.read_text(encoding="utf-8")
     assert "Ride-Winners Exit Policy" in content
     assert "**Status: ACTIVE**" in content
     assert "39 live trades" in content
 
 
-def test_append_creates_date_header(vault):
+def test_append_creates_date_in_frontmatter(vault):
     from datetime import date
     today = date.today().isoformat()
     edit = EditOp(
@@ -41,8 +52,24 @@ def test_append_creates_date_header(vault):
     )
     path = apply_edit(edit)
     content = path.read_text(encoding="utf-8")
-    assert f"## {today}" in content
+    assert today in content
     assert "Q1 Win Rate" in content
+
+
+def test_append_updates_category_index(vault):
+    """v3: appending a new entry adds a wikilink to _index.md."""
+    edit = EditOp(
+        action="append",
+        category="trading",
+        subcategory="strategies",
+        title="My New Strategy",
+        body="Some strategy content.",
+        status="ACTIVE",
+    )
+    apply_edit(edit)
+    index = (vault / "trading" / "_index.md").read_text(encoding="utf-8")
+    assert "My New Strategy" in index
+    assert "[[trading/" in index
 
 
 def test_append_to_each_category(vault):
@@ -99,27 +126,28 @@ def test_unknown_subcategory_raises(vault):
 
 
 def test_retire_entry(vault):
+    """Retire marks the individual page file as retired."""
     # First append an entry
-    apply_edit(EditOp(
+    path = apply_edit(EditOp(
         action="append",
         category="trading",
         subcategory="strategies",
         title="Old Scalp Policy",
-        body="Fixed +12¢ scalp target. Exits at 40¢.",
+        body="Fixed +12c scalp target. Exits at 40c.",
         status="ACTIVE",
     ))
+    assert path.exists()
     # Then retire it
-    path = apply_edit(EditOp(
+    retired_path = apply_edit(EditOp(
         action="retire",
         category="trading",
         subcategory="strategies",
         title="Old Scalp Policy",
         retire_reason="superseded by ride-winners exit policy",
     ))
-    content = path.read_text(encoding="utf-8")
-    assert "RETIRED" in content
+    content = retired_path.read_text(encoding="utf-8")
+    assert "retired" in content.lower()
     assert "superseded by ride-winners exit policy" in content
-    assert "## Retired" in content
 
 
 def test_legacy_create_still_works(vault):
@@ -151,10 +179,11 @@ def test_append_to_log(vault):
     assert "Activity Log" in log
 
 
-def test_multiple_appends_same_file(vault):
-    """Multiple appends to same subcategory file should accumulate."""
+def test_multiple_appends_same_subcategory_create_separate_files(vault):
+    """v3: Multiple appends to same subcategory create SEPARATE files (not one mega file)."""
+    paths = []
     for i in range(3):
-        apply_edit(EditOp(
+        path = apply_edit(EditOp(
             action="append",
             category="trading",
             subcategory="metrics",
@@ -162,7 +191,34 @@ def test_multiple_appends_same_file(vault):
             body=f"Content {i}.",
             status="ACTIVE",
         ))
-    content = (vault / "trading" / "metrics.md").read_text(encoding="utf-8")
-    assert "Entry 0" in content
-    assert "Entry 1" in content
-    assert "Entry 2" in content
+        paths.append(path)
+
+    # Each should be a separate file
+    assert len(set(p.name for p in paths)) == 3, "Expected 3 distinct files"
+
+    # Each file contains its own content
+    for i, path in enumerate(paths):
+        content = path.read_text(encoding="utf-8")
+        assert f"Entry {i}" in content
+        assert f"Content {i}" in content
+
+
+def test_slug_deduplication(vault):
+    """Two entries with same title get distinct slugs."""
+    p1 = apply_edit(EditOp(
+        action="append",
+        category="trading",
+        subcategory="strategies",
+        title="Same Title",
+        body="First.",
+        status="ACTIVE",
+    ))
+    p2 = apply_edit(EditOp(
+        action="append",
+        category="trading",
+        subcategory="strategies",
+        title="Same Title",
+        body="Second.",
+        status="ACTIVE",
+    ))
+    assert p1.name != p2.name, "Duplicate titles must produce distinct file names"
