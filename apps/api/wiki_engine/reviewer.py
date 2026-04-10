@@ -98,6 +98,7 @@ Rules:
 - Use specific numbers and dates where they exist in the input.
 - NEVER include line numbers, file paths, or commit SHAs in the entry body.
 - NEVER approve noise with a "it could be useful later" rationale.
+- NEVER use [[wikilinks]] in the entry body. Do NOT create links like [[borina]], [[polymarket]], [[trading]], etc. Write plain text only. Wikilinks create ghost nodes in Obsidian's graph view and pollute the vault with empty placeholder pages.
 - APPEND to existing files only — never propose creating new files.
 """
 
