@@ -64,3 +64,13 @@ class AgentWorkspace(SQLModel, table=True):
     key: str
     value: str = ""
     created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class ChatMessage(SQLModel, table=True):
+    """A single message in a chat thread with an agent."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    agent_id: str = Field(index=True)
+    role: str  # "user" or "assistant"
+    content: str
+    job_id: Optional[int] = Field(default=None, foreign_key="job.id")
+    created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
