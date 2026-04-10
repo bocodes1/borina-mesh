@@ -70,5 +70,59 @@ class QADirector(Agent):
             )
         return result
 
+    async def dispatch(self, agent_id: str, prompt: str, job_id: int | None = None) -> str:
+        """Dispatch a prompt to another agent and collect the full response."""
+        from agents.base import registry
+        agent = registry.get(agent_id)
+        if agent is None:
+            raise ValueError(f"Unknown agent_id: {agent_id}")
+        chunks: list[str] = []
+        async for chunk in agent.stream(prompt):
+            if chunk.get("type") == "text":
+                chunks.append(chunk.get("content", ""))
+        return "".join(chunks)
+
+    async def pipeline_dispatch(
+        self,
+        steps: list[dict],
+        workspace_id: str,
+        engine=None,
+    ) -> str:
+        """Execute a multi-step pipeline using the workspace blackboard.
+
+        Each step: {"agent_id": str, "prompt_template": str}
+        The prompt_template can use {context} to inject current workspace state.
+        """
+        import json
+        from sqlmodel import Session, select
+        from models import AgentWorkspace
+
+        if engine is None:
+            from db import engine
+
+        output = ""
+        for step in steps:
+            with Session(engine) as session:
+                entries = session.exec(
+                    select(AgentWorkspace)
+                    .where(AgentWorkspace.workspace_id == workspace_id)
+                ).all()
+            context = {e.key: e.value for e in entries}
+
+            prompt = step["prompt_template"].replace("{context}", json.dumps(context))
+            output = await self.dispatch(step["agent_id"], prompt)
+
+            with Session(engine) as session:
+                entry = AgentWorkspace(
+                    workspace_id=workspace_id,
+                    agent_id=step["agent_id"],
+                    key=f"{step['agent_id']}_output",
+                    value=output[:5000],
+                )
+                session.add(entry)
+                session.commit()
+
+        return output
+
 
 registry.register(QADirector)

@@ -1,3 +1,4 @@
+import pytest
 from sqlmodel import Session, create_engine, SQLModel, select
 
 from models import AgentWorkspace
@@ -37,3 +38,42 @@ def test_workspace_multiple_entries():
             select(AgentWorkspace).where(AgentWorkspace.workspace_id == "p1")
         ).all()
         assert len(entries) == 2
+
+
+@pytest.mark.asyncio
+async def test_pipeline_dispatch(monkeypatch):
+    from agents.qa_director import QADirector
+    from agents.base import Agent, AgentRegistry
+
+    class FakeScout(Agent):
+        id = "fake-scout-ws"
+        name = "Fake Scout"
+        system_prompt = "You find things."
+
+        async def stream(self, prompt, job_id=None):
+            yield {"type": "text", "content": "Found widget X"}
+            yield {"type": "done", "content": ""}
+
+    fake_registry = AgentRegistry()
+    fake_registry.register(FakeScout)
+
+    import agents.base as base_mod
+    monkeypatch.setattr(base_mod, "registry", fake_registry)
+
+    qa = QADirector()
+    engine = make_engine()
+
+    output = await qa.pipeline_dispatch(
+        steps=[{"agent_id": "fake-scout-ws", "prompt_template": "Find products. Context: {context}"}],
+        workspace_id="test-pipeline",
+        engine=engine,
+    )
+    assert "Found widget X" in output
+
+    # Verify workspace was written
+    with Session(engine) as s:
+        entries = s.exec(
+            select(AgentWorkspace).where(AgentWorkspace.workspace_id == "test-pipeline")
+        ).all()
+        assert len(entries) == 1
+        assert entries[0].key == "fake-scout-ws_output"
