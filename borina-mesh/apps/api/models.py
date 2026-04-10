@@ -74,3 +74,17 @@ class ChatMessage(SQLModel, table=True):
     content: str
     job_id: Optional[int] = Field(default=None, foreign_key="job.id")
     created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
+
+
+class AgentTask(SQLModel, table=True):
+    """A task on the agent kanban board."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    title: str
+    description: str = ""
+    assigned_agent: Optional[str] = Field(default=None, index=True)
+    status: str = Field(default="backlog", index=True)
+    priority: str = Field(default="medium")
+    input_data: Optional[str] = None
+    output_data: Optional[str] = None
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    completed_at: Optional[datetime] = None
