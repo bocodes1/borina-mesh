@@ -54,3 +54,13 @@ class MorningBrief(SQLModel, table=True):
     total_runs: int = 0
     total_cost_usd: float = 0.0
     created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class AgentWorkspace(SQLModel, table=True):
+    """Shared blackboard entry for inter-agent communication."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    workspace_id: str = Field(index=True)
+    agent_id: str = Field(index=True)
+    key: str
+    value: str = ""
+    created_at: datetime = Field(default_factory=datetime.utcnow)
