@@ -41,3 +41,44 @@ def test_morning_brief_date_unique():
         s.add(MorningBrief(date="2026-04-09", summary="second"))
         with pytest.raises(IntegrityError):
             s.commit()
+
+
+from models import AgentRun, Job, JobStatus
+
+
+def test_gather_last_24h_runs():
+    from briefs import gather_last_24h_runs
+
+    engine = make_engine()
+    with Session(engine) as s:
+        job = Job(agent_id="ceo", prompt="test", status=JobStatus.COMPLETED)
+        s.add(job)
+        s.commit()
+        s.refresh(job)
+        run = AgentRun(job_id=job.id, agent_id="ceo", output="found 3 products")
+        s.add(run)
+        s.commit()
+
+    runs = gather_last_24h_runs(engine)
+    assert len(runs) == 1
+    assert runs[0].agent_id == "ceo"
+
+
+def test_build_brief_prompt_with_runs():
+    from briefs import build_brief_prompt
+
+    runs = [
+        AgentRun(id=1, job_id=1, agent_id="ceo", output="morning report done"),
+        AgentRun(id=2, job_id=2, agent_id="trader", output="bot healthy"),
+    ]
+    prompt = build_brief_prompt(runs)
+    assert "ceo" in prompt
+    assert "trader" in prompt
+    assert "morning report done" in prompt
+
+
+def test_build_brief_prompt_empty():
+    from briefs import build_brief_prompt
+
+    prompt = build_brief_prompt([])
+    assert "No agent runs" in prompt
