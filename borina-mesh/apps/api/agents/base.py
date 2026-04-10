@@ -28,6 +28,11 @@ class Agent:
             "model": self.model,
         }
 
+    def load_memory(self) -> str:
+        """Load this agent's memory file from the Obsidian vault."""
+        from memory import read_memory
+        return read_memory(self.id)
+
     async def stream(self, prompt: str) -> AsyncIterator[dict]:
         """Stream a response using Claude Agent SDK.
 

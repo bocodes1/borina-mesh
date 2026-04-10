@@ -8,12 +8,13 @@ from fastapi.responses import RedirectResponse
 from dotenv import load_dotenv
 
 from db import init_db
-from routes import agents as agents_routes, chat as chat_routes, jobs as jobs_routes, briefs as briefs_routes
+from routes import agents as agents_routes, chat as chat_routes, jobs as jobs_routes, briefs as briefs_routes, memory as memory_routes
 
 # Import agent modules to trigger registration
 import agents.ceo  # noqa
 import agents.scout  # noqa
 import agents.polymarket  # noqa
+import agents.qa_director  # noqa
 
 load_dotenv()
 
@@ -47,6 +48,7 @@ app.include_router(agents_routes.router)
 app.include_router(chat_routes.router)
 app.include_router(jobs_routes.router)
 app.include_router(briefs_routes.router)
+app.include_router(memory_routes.router)
 
 
 @app.get("/")
