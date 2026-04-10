@@ -82,3 +82,42 @@ def test_build_brief_prompt_empty():
 
     prompt = build_brief_prompt([])
     assert "No agent runs" in prompt
+
+
+import pytest
+from fastapi.testclient import TestClient
+from sqlalchemy.pool import StaticPool
+from sqlmodel import Session, SQLModel, create_engine
+
+
+@pytest.fixture
+def client():
+    """TestClient with in-memory DB."""
+    from db import get_session
+    from main import app
+
+    test_engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    SQLModel.metadata.create_all(test_engine)
+
+    def _override_session():
+        with Session(test_engine) as session:
+            yield session
+
+    app.dependency_overrides[get_session] = _override_session
+    yield TestClient(app)
+    app.dependency_overrides.clear()
+
+
+def test_get_briefs_empty(client):
+    resp = client.get("/briefs")
+    assert resp.status_code == 200
+    assert resp.json() == []
+
+
+def test_get_briefs_latest_empty(client):
+    resp = client.get("/briefs/latest")
+    assert resp.status_code == 404
