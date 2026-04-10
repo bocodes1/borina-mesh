@@ -15,6 +15,10 @@ import agents.ceo  # noqa
 import agents.scout  # noqa
 import agents.polymarket  # noqa
 import agents.qa_director  # noqa
+import agents.researcher  # noqa
+import agents.trader  # noqa
+import agents.adset  # noqa
+import agents.inbox  # noqa
 
 load_dotenv()
 
