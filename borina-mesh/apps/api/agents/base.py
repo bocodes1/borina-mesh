@@ -16,6 +16,7 @@ class Agent:
     tagline: ClassVar[str] = ""
     system_prompt: ClassVar[str] = ""
     tools: ClassVar[list[str]] = []
+    personality: ClassVar[str] = ""
     model: ClassVar[str] = "claude-opus-4-6"
 
     def to_dict(self) -> dict:
@@ -33,6 +34,17 @@ class Agent:
         from memory import read_memory
         return read_memory(self.id)
 
+    def effective_system_prompt(self) -> str:
+        """Build the full system prompt: personality + memory + system_prompt."""
+        parts = []
+        if self.personality:
+            parts.append(self.personality)
+        memory = self.load_memory()
+        if memory:
+            parts.append(f"## Your Memory\n{memory}")
+        parts.append(self.system_prompt)
+        return "\n\n".join(parts)
+
     async def stream(self, prompt: str) -> AsyncIterator[dict]:
         """Stream a response using Claude Agent SDK.
 
@@ -48,7 +60,7 @@ class Agent:
             from claude_agent_sdk import query, ClaudeAgentOptions
 
             options = ClaudeAgentOptions(
-                system_prompt=self.system_prompt,
+                system_prompt=self.effective_system_prompt(),
                 model=self.model,
             )
 
