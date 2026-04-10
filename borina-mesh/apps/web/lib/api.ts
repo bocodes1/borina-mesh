@@ -1,4 +1,4 @@
-import type { Agent, Job } from "./types";
+import type { Agent, Job, MorningBrief } from "./types";
 
 const API_BASE = "/api"; // proxied to backend via next.config.js
 
@@ -26,4 +26,8 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ agent_id: agentId, prompt }),
     }),
+  getLatestBrief: () => fetchJSON<MorningBrief>("/briefs/latest"),
+  listBriefs: (limit = 14) => fetchJSON<MorningBrief[]>(`/briefs?limit=${limit}`),
+  generateBrief: () =>
+    fetchJSON<MorningBrief>("/briefs/generate", { method: "POST" }),
 };

@@ -22,3 +22,13 @@ export interface StreamChunk {
   type: "text" | "tool_use" | "done" | "error";
   content: string;
 }
+
+export interface MorningBrief {
+  id: number;
+  date: string;
+  summary: string;
+  cost_summary: string;
+  total_runs: number;
+  total_cost_usd: number;
+  created_at: string;
+}
