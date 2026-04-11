@@ -1,6 +1,21 @@
 """Base Agent class + registry — wired to Claude Agent SDK."""
 
 import os
+import sys
+
+# Fix Windows cp1252 encoding crash when Claude SDK subprocess emits emoji.
+# Must be set before any subprocess is spawned.
+os.environ["PYTHONUTF8"] = "1"
+os.environ["PYTHONIOENCODING"] = "utf-8"
+if sys.platform == "win32":
+    # Force UTF-8 mode for the current process too
+    if hasattr(sys.stdout, "reconfigure"):
+        try:
+            sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+            sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+
 from typing import ClassVar, AsyncIterator, Optional
 
 
@@ -17,7 +32,14 @@ class Agent:
     system_prompt: ClassVar[str] = ""
     tools: ClassVar[list[str]] = []
     personality: ClassVar[str] = ""
-    model: ClassVar[str] = "claude-opus-4-6"
+
+    @property
+    def model(self) -> str:
+        from agents.models import resolve_model
+        try:
+            return resolve_model(self.id)
+        except KeyError:
+            return "claude-sonnet-4-6"
 
     def to_dict(self) -> dict:
         return {
@@ -45,16 +67,19 @@ class Agent:
         parts.append(self.system_prompt)
         return "\n\n".join(parts)
 
-    async def stream(self, prompt: str) -> AsyncIterator[dict]:
+    async def stream(self, prompt: str, job_id: int | None = None) -> AsyncIterator[dict]:
         """Stream a response using Claude Agent SDK.
 
-        Yields: {"type": "text|tool_use|done", "content": str}
+        Publishes activity events and yields chunks: {"type": str, "content": str}
         """
-        api_key = os.getenv("ANTHROPIC_API_KEY", "")
-        if not api_key:
-            yield {"type": "text", "content": "ANTHROPIC_API_KEY not set in .env"}
-            yield {"type": "done", "content": ""}
-            return
+        from events import bus, ActivityEvent
+
+        await bus.publish(ActivityEvent(
+            agent_id=self.id,
+            kind="started",
+            message=f"{self.name} started: {prompt[:80]}",
+            job_id=job_id,
+        ))
 
         try:
             from claude_agent_sdk import query, ClaudeAgentOptions
@@ -62,20 +87,44 @@ class Agent:
             options = ClaudeAgentOptions(
                 system_prompt=self.effective_system_prompt(),
                 model=self.model,
+                env={"PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"},
             )
 
             tokens_total = 0
+            text_total = 0
             async for message in query(prompt=prompt, options=options):
                 tokens_total += self._extract_usage(message)
                 text = self._extract_text(message)
                 if text:
+                    text_total += len(text)
                     yield {"type": "text", "content": text}
 
+            await bus.publish(ActivityEvent(
+                agent_id=self.id,
+                kind="completed",
+                message=f"{self.name} completed ({text_total} chars)",
+                job_id=job_id,
+            ))
             yield {"type": "done", "content": "", "tokens_used": tokens_total}
         except ImportError:
+            await bus.publish(ActivityEvent(
+                agent_id=self.id,
+                kind="failed",
+                message="claude-agent-sdk not installed",
+                job_id=job_id,
+            ))
             yield {"type": "text", "content": "claude-agent-sdk not installed"}
             yield {"type": "done", "content": ""}
         except Exception as e:
+            import traceback
+            tb = traceback.format_exc()
+            print(f"[agent:{self.id}] FULL ERROR:\n{tb}", file=sys.stderr)
+            await bus.publish(ActivityEvent(
+                agent_id=self.id,
+                kind="failed",
+                message=f"Agent error: {e}",
+                job_id=job_id,
+            ))
             yield {"type": "error", "content": f"Agent error: {e}"}
             yield {"type": "done", "content": ""}
 

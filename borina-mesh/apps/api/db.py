@@ -2,6 +2,7 @@
 
 import os
 import sqlite3
+from contextlib import contextmanager
 from sqlmodel import create_engine, SQLModel, Session
 
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./borina.db")
@@ -16,7 +17,18 @@ engine = create_engine(
 def _run_migrations(db_path: str) -> None:
     """Apply idempotent column migrations for schema upgrades on existing DBs."""
     migrations = [
-        # Phase 5 tables (columns for upgrading existing DBs)
+        # Phase 4 migrations
+        ("job", "kind", "TEXT DEFAULT 'agent_run'"),
+        ("job", "repo_path", "TEXT"),
+        ("job", "base_branch", "TEXT"),
+        ("job", "worker_branch", "TEXT"),
+        ("job", "worker_pid", "INTEGER"),
+        ("job", "log_path", "TEXT"),
+        ("job", "qa_verdict", "TEXT"),
+        ("job", "qa_notes", "TEXT"),
+        ("agentrun", "qa_verdict", "TEXT"),
+        ("agentrun", "qa_notes", "TEXT"),
+        # Phase 5 migrations
         ("morningbrief", "cost_summary", "TEXT DEFAULT ''"),
         ("morningbrief", "total_runs", "INTEGER DEFAULT 0"),
         ("morningbrief", "total_cost_usd", "REAL DEFAULT 0.0"),
@@ -55,3 +67,13 @@ def get_session():
     """FastAPI dependency for database sessions."""
     with Session(engine) as session:
         yield session
+
+
+@contextmanager
+def session_scope():
+    """Context manager for database sessions (non-FastAPI usage)."""
+    s = Session(engine)
+    try:
+        yield s
+    finally:
+        s.close()

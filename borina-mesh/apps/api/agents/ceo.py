@@ -23,7 +23,6 @@ class CEOAgent(Agent):
 Access the Obsidian vault at the configured path to read reports and memory files.
 Write your daily briefing to `reports/{today}/ceo-briefing.md`."""
     tools = ["read_file", "write_file", "list_dir"]
-    model = "claude-opus-4-6"
 
 
 registry.register(CEOAgent)

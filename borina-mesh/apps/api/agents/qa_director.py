@@ -7,10 +7,15 @@ from typing import Optional
 from agents.base import Agent, registry
 
 
-class Verdict(Enum):
-    APPROVED = "approved"
-    NEEDS_REVISION = "needs_revision"
-    REJECTED = "rejected"
+class ReviewVerdict(str, Enum):
+    APPROVE = "approve"
+    APPROVE_WITH_NOTES = "approve_with_notes"
+    REQUEST_RERUN = "request_rerun"
+    BLOCK = "block"
+
+
+# Alias for backward compat
+Verdict = ReviewVerdict
 
 
 @dataclass
@@ -20,7 +25,7 @@ class ReviewResult:
 
 
 class QADirector(Agent):
-    id = "qa-director"
+    id = "qa_director"
     name = "QA Director"
     emoji = "\U0001F50D"
     tagline = "Reviews agent work for quality and accuracy"
@@ -48,13 +53,13 @@ class QADirector(Agent):
         """
         if not artifact or not artifact.strip():
             return ReviewResult(
-                verdict=Verdict.REJECTED,
+                verdict=ReviewVerdict.BLOCK,
                 notes="Empty artifact received.",
             )
 
         # Placeholder: real implementation will call the LLM
         return ReviewResult(
-            verdict=Verdict.APPROVED,
+            verdict=ReviewVerdict.APPROVE,
             notes="",
         )
 

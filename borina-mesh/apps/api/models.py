@@ -24,6 +24,14 @@ class Job(SQLModel, table=True):
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
     error: Optional[str] = None
+    kind: str = Field(default="agent_run", index=True)
+    repo_path: Optional[str] = None
+    base_branch: Optional[str] = None
+    worker_branch: Optional[str] = None
+    worker_pid: Optional[int] = None
+    log_path: Optional[str] = None
+    qa_verdict: Optional[str] = None
+    qa_notes: Optional[str] = None
 
 
 class AgentRun(SQLModel, table=True):
@@ -35,6 +43,8 @@ class AgentRun(SQLModel, table=True):
     tokens_used: int = 0
     cost_usd: float = 0.0
     created_at: datetime = Field(default_factory=datetime.utcnow)
+    qa_verdict: Optional[str] = None
+    qa_notes: Optional[str] = None
 
 
 class AgentConfig(SQLModel, table=True):

@@ -1,4 +1,4 @@
-# Multi-Agent Browser Automation System — Design Spec
+build# Multi-Agent Browser Automation System — Design Spec
 
 **Date:** 2026-04-05
 **Status:** Draft
@@ -70,7 +70,7 @@ Daily product discovery pipeline. Surfaces 5-10 branded dropshipping opportuniti
    - Estimated margin (20% weight)
    - Competition density (10% weight, inverse — less = better)
 
-### Output
+### Output                                                                                      
 
 **PDF Report** (`reports/YYYY-MM-DD/product-ideas.pdf`):
 ```
@@ -143,7 +143,7 @@ Competitive intelligence on top traders and market opportunities. Identify strat
    - Generate implementable recommendations (not HFT-dependent)
 
 ### Output
-
+ii
 **PDF Report** (`reports/YYYY-MM-DD/polymarket-intel.pdf`):
 ```
 # Polymarket Intelligence Report — YYYY-MM-DD

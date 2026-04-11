@@ -80,3 +80,7 @@ class SchedulerService:
     def schedules(self) -> dict[str, str]:
         """Return a copy of registered schedule cron expressions."""
         return dict(self._schedules)
+
+
+# Global singleton
+scheduler_service = SchedulerService()

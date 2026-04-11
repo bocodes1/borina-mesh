@@ -6,7 +6,7 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - DATABASE_URL=sqlite:////data/borina.db
       - CORS_ORIGINS=http://localhost:3000,http://mac-mini.local:3000
     volumes:
