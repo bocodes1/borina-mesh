@@ -16,6 +16,7 @@ class Agent:
     tagline: ClassVar[str] = ""
     system_prompt: ClassVar[str] = ""
     tools: ClassVar[list[str]] = []
+    personality: ClassVar[str] = ""
     model: ClassVar[str] = "claude-opus-4-6"
 
     def to_dict(self) -> dict:
@@ -27,6 +28,22 @@ class Agent:
             "tools": self.tools,
             "model": self.model,
         }
+
+    def load_memory(self) -> str:
+        """Load this agent's memory file from the Obsidian vault."""
+        from memory import read_memory
+        return read_memory(self.id)
+
+    def effective_system_prompt(self) -> str:
+        """Build the full system prompt: personality + memory + system_prompt."""
+        parts = []
+        if self.personality:
+            parts.append(self.personality)
+        memory = self.load_memory()
+        if memory:
+            parts.append(f"## Your Memory\n{memory}")
+        parts.append(self.system_prompt)
+        return "\n\n".join(parts)
 
     async def stream(self, prompt: str) -> AsyncIterator[dict]:
         """Stream a response using Claude Agent SDK.
@@ -43,16 +60,18 @@ class Agent:
             from claude_agent_sdk import query, ClaudeAgentOptions
 
             options = ClaudeAgentOptions(
-                system_prompt=self.system_prompt,
+                system_prompt=self.effective_system_prompt(),
                 model=self.model,
             )
 
+            tokens_total = 0
             async for message in query(prompt=prompt, options=options):
+                tokens_total += self._extract_usage(message)
                 text = self._extract_text(message)
                 if text:
                     yield {"type": "text", "content": text}
 
-            yield {"type": "done", "content": ""}
+            yield {"type": "done", "content": "", "tokens_used": tokens_total}
         except ImportError:
             yield {"type": "text", "content": "claude-agent-sdk not installed"}
             yield {"type": "done", "content": ""}
@@ -72,6 +91,14 @@ class Agent:
         if hasattr(message, "text"):
             return message.text
         return None
+
+    @staticmethod
+    def _extract_usage(message) -> int:
+        """Extract token count from a Claude SDK message."""
+        if hasattr(message, "usage"):
+            u = message.usage
+            return getattr(u, "input_tokens", 0) + getattr(u, "output_tokens", 0)
+        return 0
 
 
 class AgentRegistry:

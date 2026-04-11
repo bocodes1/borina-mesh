@@ -43,3 +43,48 @@ class AgentConfig(SQLModel, table=True):
     enabled: bool = True
     schedule_cron: Optional[str] = None
     last_run_at: Optional[datetime] = None
+
+
+class MorningBrief(SQLModel, table=True):
+    """Daily morning brief synthesized by CEO agent."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    date: str = Field(index=True, sa_column_kwargs={"unique": True})
+    summary: str = ""
+    cost_summary: str = ""
+    total_runs: int = 0
+    total_cost_usd: float = 0.0
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class AgentWorkspace(SQLModel, table=True):
+    """Shared blackboard entry for inter-agent communication."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    workspace_id: str = Field(index=True)
+    agent_id: str = Field(index=True)
+    key: str
+    value: str = ""
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class ChatMessage(SQLModel, table=True):
+    """A single message in a chat thread with an agent."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    agent_id: str = Field(index=True)
+    role: str  # "user" or "assistant"
+    content: str
+    job_id: Optional[int] = Field(default=None, foreign_key="job.id")
+    created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
+
+
+class AgentTask(SQLModel, table=True):
+    """A task on the agent kanban board."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    title: str
+    description: str = ""
+    assigned_agent: Optional[str] = Field(default=None, index=True)
+    status: str = Field(default="backlog", index=True)
+    priority: str = Field(default="medium")
+    input_data: Optional[str] = None
+    output_data: Optional[str] = None
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    completed_at: Optional[datetime] = None

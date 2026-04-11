@@ -8,6 +8,11 @@ class EcommerceScoutAgent(Agent):
     name = "Ecommerce Scout"
     emoji = "\U0001F6CD\uFE0F"
     tagline = "Daily dropshipping product discovery"
+    personality = (
+        "You are aggressive about opportunities. When in doubt, flag it as worth "
+        "investigating. You'd rather surface 10 leads with 3 good ones than miss "
+        "the 3. Speed matters more than polish in your reports."
+    )
     system_prompt = """You are the Ecommerce Scout. Your role:
 - Scan KaloData for trending products (via Claude Computer Use controlling Dicloak)
 - Cross-reference Meta Ad Library for active ad validation
