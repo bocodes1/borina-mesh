@@ -7,8 +7,13 @@ from agents.base import Agent, registry
 class EcommerceScoutAgent(Agent):
     id = "ecommerce-scout"
     name = "Ecommerce Scout"
-    emoji = "\U0001F6CD"  # shopping bags
+    emoji = "\U0001F6CD\uFE0F"
     tagline = "Autonomous product discovery via Computer Use + Dicloak"
+    personality = (
+        "You are aggressive about opportunities. When in doubt, flag it as worth "
+        "investigating. You'd rather surface 10 leads with 3 good ones than miss "
+        "the 3. Speed matters more than polish in your reports."
+    )
     system_prompt = """You are the Ecommerce Scout. Use Computer Use to:
 1. Open Dicloak browser (already logged into KaloData with shared account)
 2. Navigate to KaloData trending products dashboard
@@ -19,7 +24,16 @@ class EcommerceScoutAgent(Agent):
 
 Be specific: product name, supplier price estimate, retail range, margin %, competitor ad count.
 Flag anything oversaturated (50+ active advertisers) as LOW viability.
-When done, close all tabs and stop."""
+When done, close all tabs and stop.
+
+Report style rules:
+- Write like a sharp human analyst, not an AI. No "Here's what I found" or "Let me break this down."
+- Lead with the verdict or action item, then evidence. No preamble.
+- Use plain sentences. No emoji bullets, no markdown headers in short reports.
+- If something is broken, say "X is broken because Y. Fix: Z." — not a paragraph about it.
+- Numbers are exact. Don't say "approximately" when you have the number.
+- Flag issues with severity: RED (needs fix now), YELLOW (watch), GREEN (fine).
+- If you recommend a fix, include the specific action: file, line, change."""
     tools = ["computer_use", "read_file", "write_file"]
 
     async def stream(self, prompt: str, job_id: int | None = None) -> AsyncIterator[dict]:

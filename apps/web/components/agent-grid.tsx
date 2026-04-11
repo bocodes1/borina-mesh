@@ -15,16 +15,21 @@ export function AgentGrid({ onSelectAgent }: AgentGridProps) {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    api
-      .listAgents()
-      .then((data) => {
-        setAgents(data);
-        setLoading(false);
-      })
-      .catch((err) => {
-        setError(err.message);
-        setLoading(false);
-      });
+    const fetchAgents = () => {
+      api
+        .listAgents()
+        .then((data) => {
+          setAgents(data);
+          setLoading(false);
+        })
+        .catch((err) => {
+          setError(err.message);
+          setLoading(false);
+        });
+    };
+    fetchAgents();
+    const interval = setInterval(fetchAgents, 5000);
+    return () => clearInterval(interval);
   }, []);
 
   if (loading) {

@@ -1,6 +1,15 @@
 """Borina Mesh — FastAPI application entry point."""
 
-import os
+# Fix Windows cp1252 crash — must be FIRST before any imports.
+import os, sys
+os.environ["PYTHONUTF8"] = "1"
+os.environ["PYTHONIOENCODING"] = "utf-8"
+if sys.platform == "win32" and hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -8,7 +17,7 @@ from fastapi.responses import RedirectResponse
 from dotenv import load_dotenv
 
 from db import init_db
-from routes import agents as agents_routes, chat as chat_routes, jobs as jobs_routes, activity as activity_routes, schedules as schedules_routes, analytics as analytics_routes, artifacts as artifacts_routes, logs as logs_routes, wiki as wiki_routes
+from routes import agents as agents_routes, chat as chat_routes, jobs as jobs_routes, activity as activity_routes, schedules as schedules_routes, analytics as analytics_routes, artifacts as artifacts_routes, logs as logs_routes, wiki as wiki_routes, briefs as briefs_routes, memory as memory_routes, workspace as workspace_routes, threads as threads_routes, tasks as tasks_routes, stats as stats_routes
 from scheduler import scheduler_service
 
 # Import agent modules to trigger registration
@@ -34,9 +43,8 @@ async def lifespan(app: FastAPI):
         ensure_vault_layout()
         bootstrap_schema_file()
         bootstrap_subcategory_files()
-        # Bootstrap curator memory file too
         from wiki_engine.curator_memory import read_curator_memory
-        read_curator_memory()  # side effect: writes initial file if missing
+        read_curator_memory()
     except RuntimeError:
         print("[wiki] OBSIDIAN_VAULT_PATH not set — wiki engine disabled")
     except Exception as e:
@@ -73,6 +81,12 @@ app.include_router(analytics_routes.router)
 app.include_router(artifacts_routes.router)
 app.include_router(logs_routes.router)
 app.include_router(wiki_routes.router)
+app.include_router(briefs_routes.router)
+app.include_router(memory_routes.router)
+app.include_router(workspace_routes.router)
+app.include_router(threads_routes.router)
+app.include_router(tasks_routes.router)
+app.include_router(stats_routes.router)
 
 
 @app.get("/")

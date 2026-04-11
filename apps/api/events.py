@@ -28,6 +28,9 @@ class EventBus:
         self._subscribers: list[asyncio.Queue] = []
 
     async def publish(self, event: ActivityEvent) -> None:
+        _recent.append(event)
+        if len(_recent) > _MAX_RECENT:
+            _recent.pop(0)
         for queue in list(self._subscribers):
             try:
                 queue.put_nowait(event)
@@ -43,6 +46,16 @@ class EventBus:
                 yield event
         finally:
             self._subscribers.remove(queue)
+
+
+# Buffer last 50 events for polling fallback
+_recent: list[ActivityEvent] = []
+_MAX_RECENT = 50
+
+
+def recent_events() -> list[ActivityEvent]:
+    """Return the last 50 events, newest first."""
+    return list(reversed(_recent))
 
 
 # Global bus shared across the app

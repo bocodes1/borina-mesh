@@ -5,20 +5,26 @@ import { motion } from "framer-motion";
 import { Activity, Zap, Clock, Server } from "lucide-react";
 
 interface Stats {
-  activeJobs: number;
-  queuedJobs: number;
-  todayRuns: number;
-  uptime: string;
+  active: number;
+  queued: number;
+  today: number;
 }
 
 export function MissionControl() {
-  const [stats, setStats] = useState<Stats>({
-    activeJobs: 0,
-    queuedJobs: 0,
-    todayRuns: 0,
-    uptime: "—",
-  });
+  const [stats, setStats] = useState<Stats>({ active: 0, queued: 0, today: 0 });
   const [currentTime, setCurrentTime] = useState("");
+
+  useEffect(() => {
+    const fetchStats = () => {
+      fetch("/api/jobs/stats")
+        .then((r) => r.json())
+        .then(setStats)
+        .catch(() => {});
+    };
+    fetchStats();
+    const interval = setInterval(fetchStats, 5000);
+    return () => clearInterval(interval);
+  }, []);
 
   useEffect(() => {
     const updateTime = () => {
@@ -44,10 +50,10 @@ export function MissionControl() {
           </div>
           <span className="text-sm font-mono">system online</span>
         </div>
-        <StatItem icon={<Activity className="h-4 w-4" />} label="active" value={stats.activeJobs} />
-        <StatItem icon={<Clock className="h-4 w-4" />} label="queued" value={stats.queuedJobs} />
-        <StatItem icon={<Zap className="h-4 w-4" />} label="today" value={stats.todayRuns} />
-        <StatItem icon={<Server className="h-4 w-4" />} label="host" value="mac-mini" />
+        <StatItem icon={<Activity className="h-4 w-4" />} label="active" value={stats.active} />
+        <StatItem icon={<Clock className="h-4 w-4" />} label="queued" value={stats.queued} />
+        <StatItem icon={<Zap className="h-4 w-4" />} label="today" value={stats.today} />
+        <StatItem icon={<Server className="h-4 w-4" />} label="host" value={typeof window !== "undefined" ? window.location.hostname : "—"} />
       </div>
       <div className="font-mono text-sm text-muted-foreground tabular-nums">{currentTime}</div>
     </motion.div>

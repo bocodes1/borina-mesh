@@ -4,7 +4,7 @@ import json
 from fastapi import APIRouter
 from sse_starlette.sse import EventSourceResponse
 
-from events import bus
+from events import bus, recent_events
 
 router = APIRouter(prefix="/activity", tags=["activity"])
 
@@ -21,3 +21,9 @@ async def activity_stream():
             }
 
     return EventSourceResponse(event_generator())
+
+
+@router.get("/recent")
+async def recent_activity():
+    """Return last 50 activity events (polling fallback for SSE)."""
+    return [e.to_dict() for e in recent_events()]

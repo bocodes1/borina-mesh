@@ -46,18 +46,22 @@ function buildLayout(agents: Agent[]): { nodes: Node[]; edges: Edge[] } {
     const angle = (i / others.length) * Math.PI * 2 - Math.PI / 2;
     const x = 400 + Math.cos(angle) * radius;
     const y = 300 + Math.sin(angle) * radius;
+    const isRunning = agent.status === "running";
     nodes.push({
       id: agent.id,
       position: { x, y },
-      data: { label: `${agent.emoji}  ${agent.name}` },
+      data: {
+        label: `${agent.emoji}  ${agent.name}${isRunning ? "\n⚡ " + (agent.current_task || "working...").slice(0, 40) : ""}`,
+      },
       style: {
-        background: "hsl(240 10% 8% / 0.9)",
-        border: "1px solid hsl(240 3.7% 25%)",
+        background: isRunning ? "hsl(142 76% 36% / 0.2)" : "hsl(215 20% 65% / 0.1)",
+        border: `2px solid ${isRunning ? "hsl(142 76% 36%)" : "hsl(215 20% 65% / 0.3)"}`,
         borderRadius: "12px",
-        padding: "10px 18px",
-        color: "hsl(0 0% 95%)",
+        padding: "12px 18px",
+        color: "white",
         fontSize: "13px",
         fontWeight: 500,
+        whiteSpace: "pre-line" as const,
       },
     });
 
@@ -81,12 +85,17 @@ export function NetworkGraph() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    api.listAgents().then((agents) => {
-      const layout = buildLayout(agents);
-      setNodes(layout.nodes);
-      setEdges(layout.edges);
-      setLoading(false);
-    });
+    const refresh = () => {
+      api.listAgents().then((agents) => {
+        const { nodes: n, edges: e } = buildLayout(agents);
+        setNodes(n);
+        setEdges(e);
+        setLoading(false);
+      });
+    };
+    refresh();
+    const interval = setInterval(refresh, 5000);
+    return () => clearInterval(interval);
   }, [setNodes, setEdges]);
 
   useEffect(() => {

@@ -62,6 +62,12 @@ export function AgentCard({ agent, onClick, index }: AgentCardProps) {
               {agent.tagline}
             </div>
 
+            {status === "running" && agent.current_task && (
+              <div className="text-xs text-blue-400 mb-2 truncate animate-pulse">
+                {agent.current_task}
+              </div>
+            )}
+
             <div className="flex items-center justify-between text-xs text-muted-foreground">
               <ModelBadge model={agent.model} />
               <span>last: {relativeTime(agent.last_run_at)}</span>

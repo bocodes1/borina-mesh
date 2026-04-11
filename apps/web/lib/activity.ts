@@ -7,7 +7,8 @@ export interface ActivityEvent {
 }
 
 export function subscribeToActivity(onEvent: (event: ActivityEvent) => void): () => void {
-  const source = new EventSource("/api/activity/stream");
+  const url = "/api/activity/stream";
+  const source = new EventSource(url);
 
   source.addEventListener("activity", (e) => {
     try {
@@ -18,9 +19,35 @@ export function subscribeToActivity(onEvent: (event: ActivityEvent) => void): ()
     }
   });
 
-  source.onerror = () => {
-    // EventSource auto-reconnects; no action needed
+  // Poll recent events every 10s as fallback for SSE proxy issues
+  let pollInterval: ReturnType<typeof setInterval> | null = null;
+  let lastTimestamp = "";
+
+  const pollEvents = async () => {
+    try {
+      const res = await fetch("/api/activity/recent");
+      if (res.ok) {
+        const events: ActivityEvent[] = await res.json();
+        for (const event of events) {
+          if (event.timestamp > lastTimestamp) {
+            lastTimestamp = event.timestamp;
+            onEvent(event);
+          }
+        }
+      }
+    } catch {
+      // ignore poll errors
+    }
   };
 
-  return () => source.close();
+  pollInterval = setInterval(pollEvents, 10000);
+
+  source.onerror = () => {
+    // EventSource auto-reconnects
+  };
+
+  return () => {
+    source.close();
+    if (pollInterval) clearInterval(pollInterval);
+  };
 }

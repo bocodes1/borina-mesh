@@ -9,6 +9,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
+import { MarkdownOutput } from "./markdown-output";
 import type { Job, AgentRun } from "@/lib/types";
 
 interface JobDetailModalProps {
@@ -132,14 +133,77 @@ export function JobDetailModal({ job, agentName, agentEmoji, onClose }: JobDetai
                   key={run.id}
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
-                  className="text-sm whitespace-pre-wrap font-mono leading-relaxed"
+                  className="text-sm whitespace-pre-wrap leading-relaxed"
                 >
-                  {run.output}
+                  <MarkdownOutput content={run.output} />
                 </motion.div>
               ))}
           </div>
         </ScrollArea>
+
+        {/* Action panel — approve fixes */}
+        {!loading && runs.length > 0 && (
+          <ActionPanel runs={runs} agentId={job.agent_id} />
+        )}
       </DialogContent>
     </Dialog>
+  );
+}
+
+function ActionPanel({ runs, agentId }: { runs: AgentRun[]; agentId: string }) {
+  const [dispatching, setDispatching] = useState<string | null>(null);
+  const [dispatched, setDispatched] = useState<Set<string>>(new Set());
+
+  const output = runs.map((r) => r.output).join("\n");
+
+  const issueLines = output
+    .split("\n")
+    .filter((line) => /RED|CRITICAL|Immediate|Fix:|Action:/i.test(line))
+    .map((line) => line.replace(/^[\s\-\*#]+/, "").trim())
+    .filter((line) => line.length > 10 && line.length < 200);
+
+  if (issueLines.length === 0) return null;
+
+  const approveFix = async (issue: string) => {
+    setDispatching(issue);
+    try {
+      await fetch("/api/chat/" + agentId, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          prompt: `Fix this issue autonomously. Implement the fix, test it, and report back what you changed:\n\n${issue}`,
+        }),
+      });
+      setDispatched((prev) => new Set(prev).add(issue));
+    } catch {
+      // ignore
+    }
+    setDispatching(null);
+  };
+
+  return (
+    <div className="px-6 py-4 border-t border-border bg-red-500/5">
+      <div className="text-xs font-medium text-red-400 mb-3">
+        ACTIONABLE ISSUES ({issueLines.length})
+      </div>
+      <div className="space-y-2">
+        {issueLines.map((issue, i) => (
+          <div key={i} className="flex items-center justify-between gap-3 text-sm">
+            <span className="flex-1 truncate">{issue}</span>
+            {dispatched.has(issue) ? (
+              <span className="text-xs text-green-400 whitespace-nowrap">Dispatched</span>
+            ) : (
+              <button
+                className="text-xs px-3 py-1 rounded bg-red-500/20 text-red-400 hover:bg-red-500/30 whitespace-nowrap disabled:opacity-50"
+                onClick={() => approveFix(issue)}
+                disabled={dispatching !== null}
+              >
+                {dispatching === issue ? "Sending..." : "Approve Fix"}
+              </button>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
