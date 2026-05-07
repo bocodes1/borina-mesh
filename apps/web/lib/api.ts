@@ -37,6 +37,11 @@ export const api = {
       method: "DELETE",
     }),
   listArtifacts: () => fetchJSON<Artifact[]>("/artifacts"),
+  getArtifactText: async (date: string, name: string): Promise<string> => {
+    const res = await fetch(`${API_BASE}/artifacts/${date}/${name}/text`);
+    if (!res.ok) throw new Error(`API error ${res.status}: ${res.statusText}`);
+    return res.text();
+  },
   getJobRuns: (jobId: number) => fetchJSON<AgentRun[]>(`/jobs/${jobId}/runs`),
   createHandoff: (body: { repo_path: string; base_branch: string; prompt: string }) =>
     fetchJSON<{ job_id: number; dashboard_url: string; worktree_path: string }>("/jobs/handoff", {

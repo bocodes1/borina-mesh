@@ -84,6 +84,7 @@ export interface Schedule {
 export interface Artifact {
   date: string;
   name: string;
+  agent: string;
   size_bytes: number;
   modified: string;
   path: string;
