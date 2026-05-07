@@ -139,17 +139,40 @@ class TmuxSupervisor:
         return result.returncode == 0
 
     def list_sessions(self) -> list[dict]:
+        """Snapshot every borina-p{pane}-* session tmux currently owns.
+
+        Queries tmux directly so externally created sessions and sessions
+        that survived an API restart are still visible — not just the
+        in-memory dict. In-memory metadata (workdir, spawned_at) is merged
+        in when available.
+        """
+        prefix = _session_prefix()
+        result = subprocess.run(
+            ["tmux", "list-sessions", "-F", "#{session_name}|#{session_created}"],
+            capture_output=True, text=True,
+        )
+        if result.returncode != 0:
+            # No tmux server running yet → no sessions.
+            return []
+        out: list[dict] = []
         with self._lock:
-            out = []
-            for agent_id, info in self._sessions.items():
+            for line in result.stdout.splitlines():
+                name, _, created = line.strip().partition("|")
+                if not name.startswith(prefix):
+                    continue
+                agent_id = name[len(prefix):]
+                info = self._sessions.get(agent_id)
                 out.append({
                     "agent_id": agent_id,
-                    "session_name": info.session_name,
-                    "workdir": info.workdir,
-                    "spawned_at": info.spawned_at,
-                    "alive": self.session_exists(agent_id),
+                    "session_name": name,
+                    "workdir": info.workdir if info else None,
+                    "spawned_at": info.spawned_at if info else (
+                        float(created) if created.isdigit() else None
+                    ),
+                    "alive": True,
+                    "tracked": info is not None,
                 })
-            return out
+        return out
 
     def spawn(self, agent_id: str, workdir: str, system_prompt: str) -> SessionInfo:
         """Start a tmux session running `claude` in `workdir`.
