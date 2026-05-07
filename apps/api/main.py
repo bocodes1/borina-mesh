@@ -18,6 +18,7 @@ from dotenv import load_dotenv
 
 from db import init_db
 from routes import agents as agents_routes, chat as chat_routes, jobs as jobs_routes, activity as activity_routes, schedules as schedules_routes, analytics as analytics_routes, artifacts as artifacts_routes, logs as logs_routes, wiki as wiki_routes, briefs as briefs_routes, memory as memory_routes, workspace as workspace_routes, threads as threads_routes, tasks as tasks_routes, stats as stats_routes
+from routers.sessions import router as sessions_router
 from scheduler import scheduler_service
 
 # Import agent modules to trigger registration
@@ -87,6 +88,7 @@ app.include_router(workspace_routes.router)
 app.include_router(threads_routes.router)
 app.include_router(tasks_routes.router)
 app.include_router(stats_routes.router)
+app.include_router(sessions_router, prefix="/api/sessions", tags=["sessions"])
 
 
 @app.get("/")
