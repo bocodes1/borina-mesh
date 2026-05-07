@@ -17,7 +17,17 @@ from fastapi.responses import RedirectResponse
 from dotenv import load_dotenv
 
 from db import init_db
-from routes import agents as agents_routes, chat as chat_routes, jobs as jobs_routes, activity as activity_routes, schedules as schedules_routes, analytics as analytics_routes, artifacts as artifacts_routes, logs as logs_routes, wiki as wiki_routes, briefs as briefs_routes, memory as memory_routes, workspace as workspace_routes, threads as threads_routes, tasks as tasks_routes, stats as stats_routes
+from routes import agents as agents_routes, chat as chat_routes, jobs as jobs_routes, activity as activity_routes, schedules as schedules_routes, analytics as analytics_routes, artifacts as artifacts_routes, logs as logs_routes, wiki as wiki_routes, stats as stats_routes
+# Phase 6 imports (briefs, memory, workspace, threads, tasks) reference route
+# modules that were never committed. Tolerated here so the app boots; the
+# matching include_router calls below are guarded.
+_phase6: dict[str, object] = {}
+for _name in ("briefs", "memory", "workspace", "threads", "tasks"):
+    try:
+        _phase6[_name] = __import__(f"routes.{_name}", fromlist=[_name])
+    except Exception as _e:  # noqa: BLE001
+        print(f"[main] Phase 6 route '{_name}' not available: {type(_e).__name__}: {_e}")
+from routers.sessions import router as sessions_router
 from scheduler import scheduler_service
 
 # Import agent modules to trigger registration
@@ -81,12 +91,12 @@ app.include_router(analytics_routes.router)
 app.include_router(artifacts_routes.router)
 app.include_router(logs_routes.router)
 app.include_router(wiki_routes.router)
-app.include_router(briefs_routes.router)
-app.include_router(memory_routes.router)
-app.include_router(workspace_routes.router)
-app.include_router(threads_routes.router)
-app.include_router(tasks_routes.router)
+for _name, _mod in _phase6.items():
+    _r = getattr(_mod, "router", None)
+    if _r is not None:
+        app.include_router(_r)
 app.include_router(stats_routes.router)
+app.include_router(sessions_router, prefix="/api/sessions", tags=["sessions"])
 
 
 @app.get("/")

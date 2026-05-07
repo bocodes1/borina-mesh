@@ -1,6 +1,7 @@
 """APScheduler wrapper for cron-driven agent runs."""
 
 import asyncio
+import os
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
@@ -165,16 +166,31 @@ class SchedulerService:
             job_id=job_id,
         ))
 
+        # Scheduled runs go through the tmux-backed long-lived REPL
+        # (run_agent_task) by default. Set BORINA_USE_TMUX_AGENTS=0 to fall
+        # back to the SDK streaming path used by the chat/SSE endpoint.
         output_parts = []
         error_msg = None
-        try:
-            async for chunk in agent.stream(prompt, job_id=job_id):
-                if chunk.get("type") == "text":
-                    output_parts.append(chunk.get("content", ""))
-                elif chunk.get("type") == "error":
-                    error_msg = chunk.get("content", "unknown error")
-        except Exception as e:
-            error_msg = str(e)
+        use_tmux = os.environ.get("BORINA_USE_TMUX_AGENTS", "1") != "0"
+        if use_tmux:
+            try:
+                from agents.runner_v2 import run_agent_task
+                result = await run_agent_task(agent_id, prompt)
+                if result.output:
+                    output_parts.append(result.output)
+                if not result.ok and result.error:
+                    error_msg = result.error
+            except Exception as e:
+                error_msg = f"{type(e).__name__}: {e!r}"
+        else:
+            try:
+                async for chunk in agent.stream(prompt, job_id=job_id):
+                    if chunk.get("type") == "text":
+                        output_parts.append(chunk.get("content", ""))
+                    elif chunk.get("type") == "error":
+                        error_msg = chunk.get("content", "unknown error")
+            except Exception as e:
+                error_msg = str(e)
 
         # QA gatekeeper — runs after a successful stream, retries once on REQUEST_RERUN
         qa_verdict = None
@@ -193,14 +209,25 @@ class SchedulerService:
                     output_parts = []
                     error_msg = None
                     retry_prompt = f"{prompt}\n\n[QA rerun: {review.notes}]"
-                    try:
-                        async for chunk in agent.stream(retry_prompt, job_id=job_id):
-                            if chunk.get("type") == "text":
-                                output_parts.append(chunk.get("content", ""))
-                            elif chunk.get("type") == "error":
-                                error_msg = chunk.get("content", "unknown error")
-                    except Exception as e:
-                        error_msg = str(e)
+                    if use_tmux:
+                        try:
+                            from agents.runner_v2 import run_agent_task
+                            retry_result = await run_agent_task(agent_id, retry_prompt)
+                            if retry_result.output:
+                                output_parts.append(retry_result.output)
+                            if not retry_result.ok and retry_result.error:
+                                error_msg = retry_result.error
+                        except Exception as e:
+                            error_msg = f"{type(e).__name__}: {e!r}"
+                    else:
+                        try:
+                            async for chunk in agent.stream(retry_prompt, job_id=job_id):
+                                if chunk.get("type") == "text":
+                                    output_parts.append(chunk.get("content", ""))
+                                elif chunk.get("type") == "error":
+                                    error_msg = chunk.get("content", "unknown error")
+                        except Exception as e:
+                            error_msg = str(e)
 
                     if not error_msg:
                         full_output = "".join(output_parts)
