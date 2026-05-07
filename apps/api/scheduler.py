@@ -165,14 +165,35 @@ class SchedulerService:
             job_id=job_id,
         ))
 
+        from agents.runner_v2 import run_agent_task, AGENT_REGISTRY
+        SCHEDULER_TO_RUNNER = {
+            "ceo": "ceo",
+            "trader": "trader",
+            "researcher": "researcher",
+            "ecommerce-scout": "scout",
+            "polymarket-intel": "polymarket",
+            "adset-optimizer": "adset",
+            "inbox-triage": "inbox",
+        }
+        runner_id = SCHEDULER_TO_RUNNER.get(agent_id)
+
         output_parts = []
         error_msg = None
         try:
-            async for chunk in agent.stream(prompt, job_id=job_id):
-                if chunk.get("type") == "text":
-                    output_parts.append(chunk.get("content", ""))
-                elif chunk.get("type") == "error":
-                    error_msg = chunk.get("content", "unknown error")
+            if runner_id and runner_id in AGENT_REGISTRY:
+                # Persistent tmux session path (runner_v2).
+                result = await run_agent_task(runner_id, prompt)
+                if result.ok:
+                    output_parts.append(result.output)
+                else:
+                    error_msg = result.error
+            else:
+                # Fallback to legacy SDK streaming for unmapped agents.
+                async for chunk in agent.stream(prompt, job_id=job_id):
+                    if chunk.get("type") == "text":
+                        output_parts.append(chunk.get("content", ""))
+                    elif chunk.get("type") == "error":
+                        error_msg = chunk.get("content", "unknown error")
         except Exception as e:
             error_msg = str(e)
 
@@ -194,11 +215,18 @@ class SchedulerService:
                     error_msg = None
                     retry_prompt = f"{prompt}\n\n[QA rerun: {review.notes}]"
                     try:
-                        async for chunk in agent.stream(retry_prompt, job_id=job_id):
-                            if chunk.get("type") == "text":
-                                output_parts.append(chunk.get("content", ""))
-                            elif chunk.get("type") == "error":
-                                error_msg = chunk.get("content", "unknown error")
+                        if runner_id and runner_id in AGENT_REGISTRY:
+                            retry_result = await run_agent_task(runner_id, retry_prompt)
+                            if retry_result.ok:
+                                output_parts.append(retry_result.output)
+                            else:
+                                error_msg = retry_result.error
+                        else:
+                            async for chunk in agent.stream(retry_prompt, job_id=job_id):
+                                if chunk.get("type") == "text":
+                                    output_parts.append(chunk.get("content", ""))
+                                elif chunk.get("type") == "error":
+                                    error_msg = chunk.get("content", "unknown error")
                     except Exception as e:
                         error_msg = str(e)
 
