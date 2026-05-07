@@ -102,6 +102,23 @@ class Agent:
             return message.text
         return None
 
+    async def run_via_tmux(self, prompt: str, *, timeout_seconds: float = 600.0,
+                           idle_seconds: float = 4.0, fresh_context: bool = False) -> str:
+        """Persistent-session alternative to stream(). Uses tmux_supervisor.
+
+        Replaces subprocess-style claude invocations with a long-lived tmux
+        session per agent — preserves context across runs. Returns final text;
+        callers needing streaming should keep using stream().
+        """
+        from agents.runner_v2 import run_agent_task
+        result = await run_agent_task(
+            self.id, prompt,
+            timeout_seconds=timeout_seconds,
+            idle_seconds=idle_seconds,
+            fresh_context=fresh_context,
+        )
+        return result.output if result.ok else f"[error] {result.error}"
+
 
 class AgentRegistry:
     def __init__(self):
