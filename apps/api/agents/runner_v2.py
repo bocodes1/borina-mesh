@@ -26,54 +26,38 @@ def _workdir_root() -> Path:
     return Path.home() / ".borina" / "agents" / f"p{pn}"
 
 
-# ── default registry ──────────────────────────────────────────────────────
-# Keys are the agent IDs accepted by run_agent_task. Values are spawn metadata.
-# system_prompt is appended to claude's default system prompt at spawn time.
+# ── agent id mapping ──────────────────────────────────────────────────────
+# Short ids used in tmux session names + URLs map to the long Agent.id
+# ClassVars in agents/*.py. System prompts are read from those classes via
+# `agents.base.registry` so editing an agent's system_prompt in one place
+# is enough — no hardcoded copies to drift out of sync.
 
 AGENT_REGISTRY: dict[str, dict] = {
-    "trader": {
-        "system_prompt": (
-            "You are the Trader agent of Borina Mesh. Risk-paranoid: every "
-            "trade idea includes worst-case scenario. Output is terse and exact."
-        ),
-    },
-    "inbox": {
-        "system_prompt": (
-            "You are the Inbox Triage agent. Summarise emails and Telegrams "
-            "into one-line briefs sorted by urgency. No preamble."
-        ),
-    },
-    "scout": {
-        "system_prompt": (
-            "You are the Ecommerce Scout. Find winning products with strong "
-            "margin and emerging demand. Cite sources. No fluff."
-        ),
-    },
-    "ceo": {
-        "system_prompt": (
-            "You are the CEO agent. Produce a strategic morning briefing: "
-            "what changed, what to do today, what's blocked."
-        ),
-    },
-    "polymarket": {
-        "system_prompt": (
-            "You are the Polymarket Intel agent. Synthesise leaderboard "
-            "and whale signals into actionable trade ideas with risk."
-        ),
-    },
-    "researcher": {
-        "system_prompt": (
-            "You are the Researcher. Aggregate the morning brief: news, "
-            "papers, repos, market moves. Cite, deduplicate, prioritise."
-        ),
-    },
-    "adset": {
-        "system_prompt": (
-            "You are the Adset Optimizer. Rotate Google/Meta ad creatives "
-            "based on yesterday's performance. Numbers exact, recommendations sharp."
-        ),
-    },
+    "trader":     {"long_id": "trader"},
+    "inbox":      {"long_id": "inbox-triage"},
+    "scout":      {"long_id": "ecommerce-scout"},
+    "ceo":        {"long_id": "ceo"},
+    "polymarket": {"long_id": "polymarket-intel"},
+    "researcher": {"long_id": "researcher"},
+    "adset":      {"long_id": "adset-optimizer"},
 }
+
+
+def _resolve_system_prompt(short_id: str) -> str:
+    """Look up the agent class's system_prompt from agents.base.registry.
+
+    Returns "" if the agent isn't registered (e.g. test harness with stub
+    classes) or if the import fails — caller falls back to a generic prompt.
+    """
+    long_id = AGENT_REGISTRY.get(short_id, {}).get("long_id", short_id)
+    try:
+        from agents.base import registry  # local import to avoid cycles
+        agent = registry.get(long_id)
+        if agent is not None:
+            return getattr(agent, "system_prompt", "") or ""
+    except Exception:
+        pass
+    return ""
 
 
 @dataclass
@@ -188,9 +172,8 @@ async def run_agent_task(
     sup = get_supervisor()
 
     try:
-        registration = AGENT_REGISTRY.get(agent_id, {})
-        system_prompt = registration.get(
-            "system_prompt", f"You are the {agent_id} agent of Borina Mesh."
+        system_prompt = _resolve_system_prompt(agent_id) or (
+            f"You are the {agent_id} agent of Borina Mesh."
         )
         workdir = str(_workdir_root() / agent_id)
 
