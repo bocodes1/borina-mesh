@@ -17,6 +17,7 @@ import shlex
 import shutil
 import subprocess
 import time
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from threading import Lock
@@ -123,8 +124,9 @@ class TmuxSupervisor:
         return f"{_session_prefix()}{agent_id}"
 
     def _buffer_name(self, agent_id: str) -> str:
-        # tmux buffer names must be safe; agent_id is alphanum-ish.
-        return f"borina-buf-{agent_id}"
+        # Unique per call so two concurrent send_prompt() calls on the same
+        # agent cannot clobber each other's paste buffer.
+        return f"borina-buf-{agent_id}-{uuid.uuid4().hex[:8]}"
 
     # ── public API ─────────────────────────────────────────────────────────
 
