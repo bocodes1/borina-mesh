@@ -20,8 +20,10 @@ from typing import Optional
 
 from agents.tmux_supervisor import get_supervisor
 
-_PANE_NUMBER = os.environ.get("BORINA_PANE_NUMBER", "1")
-WORKDIR_ROOT = Path.home() / ".borina" / "agents" / f"p{_PANE_NUMBER}"
+def _workdir_root() -> Path:
+    """Resolve workdir root at call time so post-import .env loads apply."""
+    pn = os.environ.get("BORINA_PANE_NUMBER", "1")
+    return Path.home() / ".borina" / "agents" / f"p{pn}"
 
 
 # ── default registry ──────────────────────────────────────────────────────
@@ -190,7 +192,7 @@ async def run_agent_task(
         system_prompt = registration.get(
             "system_prompt", f"You are the {agent_id} agent of Borina Mesh."
         )
-        workdir = str(WORKDIR_ROOT / agent_id)
+        workdir = str(_workdir_root() / agent_id)
 
         if fresh_context and sup.session_exists(agent_id):
             sup.kill(agent_id)

@@ -29,8 +29,14 @@ _ANSI_RE = re.compile(
 _SPINNER_CHARS = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏◐◓◑◒"
 _TIMER_RE = re.compile(r"\(\s*\d+s[\s·•]+esc to interrupt\s*\)", re.IGNORECASE)
 
-_PANE_NUMBER = os.environ.get("BORINA_PANE_NUMBER", "1")
-SESSION_PREFIX = f"borina-p{_PANE_NUMBER}-"
+def _pane_number() -> str:
+    """Read pane id from env at call time so a `load_dotenv()` that runs
+    after this module is imported still takes effect on session naming."""
+    return os.environ.get("BORINA_PANE_NUMBER", "1")
+
+
+def _session_prefix() -> str:
+    return f"borina-p{_pane_number()}-"
 
 _CLAUDE_FALLBACKS = [
     str(Path.home() / ".npm-global" / "bin" / "claude"),
@@ -114,7 +120,7 @@ class TmuxSupervisor:
         return self._claude_path
 
     def _session_name(self, agent_id: str) -> str:
-        return f"{SESSION_PREFIX}{agent_id}"
+        return f"{_session_prefix()}{agent_id}"
 
     def _buffer_name(self, agent_id: str) -> str:
         # tmux buffer names must be safe; agent_id is alphanum-ish.
@@ -275,7 +281,7 @@ class TmuxSupervisor:
             if info is None and not self.session_exists(agent_id):
                 raise KeyError(f"agent_id '{agent_id}' is not known to supervisor")
             workdir = info.workdir if info else str(
-                Path.home() / ".borina" / "agents" / f"p{_PANE_NUMBER}" / agent_id
+                Path.home() / ".borina" / "agents" / f"p{_pane_number()}" / agent_id
             )
             system_prompt = info.system_prompt if info else ""
             name = self._session_name(agent_id)
