@@ -168,11 +168,17 @@ class SchedulerService:
         output_parts = []
         error_msg = None
         try:
-            async for chunk in agent.stream(prompt, job_id=job_id):
-                if chunk.get("type") == "text":
-                    output_parts.append(chunk.get("content", ""))
-                elif chunk.get("type") == "error":
-                    error_msg = chunk.get("content", "unknown error")
+            # Long-lived tmux/claude session per agent — see agents/runner_v2.py.
+            from agents.runner_v2 import run_agent_task, AGENT_REGISTRY
+            runner_id = agent_id
+            if agent_id not in AGENT_REGISTRY:
+                short_for = {spec.registered_id: short for short, spec in AGENT_REGISTRY.items()}
+                runner_id = short_for.get(agent_id, agent_id)
+            result = await run_agent_task(runner_id, prompt)
+            if result.ok:
+                output_parts.append(result.output)
+            else:
+                error_msg = result.error or "unknown error"
         except Exception as e:
             error_msg = str(e)
 
@@ -194,11 +200,11 @@ class SchedulerService:
                     error_msg = None
                     retry_prompt = f"{prompt}\n\n[QA rerun: {review.notes}]"
                     try:
-                        async for chunk in agent.stream(retry_prompt, job_id=job_id):
-                            if chunk.get("type") == "text":
-                                output_parts.append(chunk.get("content", ""))
-                            elif chunk.get("type") == "error":
-                                error_msg = chunk.get("content", "unknown error")
+                        retry_result = await run_agent_task(runner_id, retry_prompt)
+                        if retry_result.ok:
+                            output_parts.append(retry_result.output)
+                        else:
+                            error_msg = retry_result.error or "unknown error"
                     except Exception as e:
                         error_msg = str(e)
 
