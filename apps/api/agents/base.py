@@ -35,11 +35,14 @@ class Agent:
         }
 
     async def stream(self, prompt: str, job_id: int | None = None) -> AsyncIterator[dict]:
-        """Stream a response using Claude Agent SDK.
+        """Stream a response from the agent's long-lived tmux/claude session.
 
-        Publishes activity events and yields chunks: {"type": str, "content": str}
+        Publishes activity events and yields chunks: {"type": str, "content": str}.
+        Replaces the previous per-call `claude_agent_sdk.query()` flow with the
+        pool-managed runner so prompts reuse a warm REPL.
         """
         from events import bus, ActivityEvent
+        from agents.runner_v2 import run_agent_task
 
         await bus.publish(ActivityEvent(
             agent_id=self.id,
@@ -48,45 +51,33 @@ class Agent:
             job_id=job_id,
         ))
 
-        try:
-            from claude_agent_sdk import query, ClaudeAgentOptions
+        result = await run_agent_task(
+            self.id,
+            prompt,
+            idle_seconds=4,
+            timeout_seconds=600,
+        )
 
-            options = ClaudeAgentOptions(
-                system_prompt=self.system_prompt,
-                model=self.model,
-            )
-
-            text_total = 0
-            async for message in query(prompt=prompt, options=options):
-                text = self._extract_text(message)
-                if text:
-                    text_total += len(text)
-                    yield {"type": "text", "content": text}
-
+        if result.ok:
+            if result.output:
+                yield {"type": "text", "content": result.output}
             await bus.publish(ActivityEvent(
                 agent_id=self.id,
                 kind="completed",
-                message=f"{self.name} completed ({text_total} chars)",
+                message=f"{self.name} completed ({len(result.output)} chars)",
                 job_id=job_id,
             ))
             yield {"type": "done", "content": ""}
-        except ImportError:
+        else:
             await bus.publish(ActivityEvent(
                 agent_id=self.id,
                 kind="failed",
-                message="claude-agent-sdk not installed",
+                message=f"Agent error: {result.error}",
                 job_id=job_id,
             ))
-            yield {"type": "text", "content": "claude-agent-sdk not installed"}
-            yield {"type": "done", "content": ""}
-        except Exception as e:
-            await bus.publish(ActivityEvent(
-                agent_id=self.id,
-                kind="failed",
-                message=f"Agent error: {e}",
-                job_id=job_id,
-            ))
-            yield {"type": "error", "content": f"Agent error: {e}"}
+            if result.output:
+                yield {"type": "text", "content": result.output}
+            yield {"type": "error", "content": f"Agent error: {result.error}"}
             yield {"type": "done", "content": ""}
 
     @staticmethod
