@@ -12,10 +12,13 @@ Endpoints:
 
 from __future__ import annotations
 
+import asyncio
+import json
 from datetime import date
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, BackgroundTasks, HTTPException
 from pydantic import BaseModel, Field
+from sse_starlette.sse import EventSourceResponse
 
 from agents.finance_brief import (
     generate_brief,
@@ -26,6 +29,18 @@ from agents.finance_data import (
     FinanceClients,
     load_watchlist,
     save_watchlist,
+)
+from agents.finance_deepdive import (
+    cache_status,
+    generate_deepdive,
+    get_run_state,
+    invalidate_cache,
+    load_cached_deepdive,
+    split_into_sections,
+    STATUS_FRESH,
+    STATUS_GENERATING,
+    STATUS_NOT_FOUND,
+    STATUS_STALE,
 )
 from agents.finance_screen import _equity_candidate
 
@@ -167,3 +182,154 @@ async def status():
         "last_brief_duration_seconds": cached.duration_seconds if cached else None,
         "last_brief_trading_date": cached.trading_date if cached else None,
     }
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# Per-ticker deep-dive
+# ────────────────────────────────────────────────────────────────────────────
+
+
+@router.get("/deepdive/{ticker}/status")
+async def deepdive_status(ticker: str):
+    """Resolve current cache state. Applies invalidation rules (TTL, new
+    8-K, earnings crossed, >5% move). Returns ``STATUS_*``."""
+    sym = ticker.upper()
+    run = get_run_state(sym)
+    if run and run.get("status") == STATUS_GENERATING:
+        return {
+            "ticker": sym,
+            "status": STATUS_GENERATING,
+            "phase": run.get("phase"),
+            "events": run.get("events", []),
+        }
+    return {"ticker": sym, **cache_status(sym)}
+
+
+@router.get("/deepdive/{ticker}")
+async def deepdive_get(ticker: str):
+    """Return the cached deep-dive markdown + section breakdown, or 404."""
+    sym = ticker.upper()
+    cached = load_cached_deepdive(sym)
+    if cached is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No deep-dive cached for {sym}. POST /finance/deepdive/{sym}/generate to build.",
+        )
+    state = cache_status(sym)
+    return {
+        "ticker": sym,
+        "is_crypto": cached.is_crypto,
+        "generated_at": cached.generated_at,
+        "ttl_until": cached.ttl_until,
+        "duration_seconds": cached.duration_seconds,
+        "markdown": cached.markdown,
+        "sections": split_into_sections(cached.markdown),
+        "error": cached.error,
+        "data_source_status": cached.data_source_status,
+        "cache_status": state["status"],
+        "stale_reason": state.get("stale_reason"),
+    }
+
+
+class GenerateBody(BaseModel):
+    force: bool = Field(False, description="Regenerate even if cache is fresh")
+
+
+@router.post("/deepdive/{ticker}/generate")
+async def deepdive_generate(
+    ticker: str,
+    body: GenerateBody,
+    background_tasks: BackgroundTasks,
+):
+    """Kick off a deep-dive generation in the background. Returns the
+    stream URL the frontend should connect to for progress events."""
+    sym = ticker.upper()
+
+    state = cache_status(sym)
+    if state["status"] == STATUS_FRESH and not body.force:
+        return {
+            "ticker": sym,
+            "status": STATUS_FRESH,
+            "stream_url": None,
+            "message": "Cache is fresh; pass force=true to regenerate.",
+        }
+
+    # Don't double-start a generation already in flight
+    run = get_run_state(sym)
+    if run and run.get("status") == STATUS_GENERATING:
+        return {
+            "ticker": sym,
+            "status": STATUS_GENERATING,
+            "stream_url": f"/api/finance/deepdive/{sym}/stream",
+            "message": "Generation already in flight; tail the stream.",
+        }
+
+    background_tasks.add_task(_run_generation, sym)
+    return {
+        "ticker": sym,
+        "status": STATUS_GENERATING,
+        "stream_url": f"/api/finance/deepdive/{sym}/stream",
+        "message": "Generation started.",
+    }
+
+
+async def _run_generation(sym: str) -> None:
+    """Background runner — kept thin so HTTPException context isn't needed."""
+    try:
+        await generate_deepdive(sym, use_cache=False)
+    except Exception as e:
+        # Status was already flipped to FAILED inside generate_deepdive's
+        # exception path. Log here for ops visibility.
+        print(f"[finance_deepdive] {sym} generation crashed: {type(e).__name__}: {e!r}")
+
+
+@router.get("/deepdive/{ticker}/stream")
+async def deepdive_stream(ticker: str):
+    """SSE stream of generation progress. Emits one event per status flip
+    plus a final 'complete' event once the cache is written."""
+    sym = ticker.upper()
+
+    async def event_gen():
+        seen = 0
+        deadline = asyncio.get_event_loop().time() + 60 * 30  # 30 min cap
+        while asyncio.get_event_loop().time() < deadline:
+            run = get_run_state(sym)
+            if run is None:
+                # No active run — check if cache landed (would mean a non-tracked completion)
+                cached = load_cached_deepdive(sym)
+                if cached:
+                    yield {
+                        "event": "complete",
+                        "data": json.dumps({
+                            "ticker": sym,
+                            "generated_at": cached.generated_at,
+                            "duration_seconds": cached.duration_seconds,
+                        }),
+                    }
+                    return
+                yield {"event": "waiting", "data": json.dumps({"ticker": sym})}
+                await asyncio.sleep(1)
+                continue
+            events = run.get("events", [])
+            while seen < len(events):
+                evt = events[seen]
+                seen += 1
+                payload = {"ticker": sym, **evt}
+                yield {"event": evt.get("status", "update"), "data": json.dumps(payload)}
+                if evt.get("phase") == "complete":
+                    return
+            if run.get("status") in (STATUS_FRESH,):
+                return
+            await asyncio.sleep(1)
+        # Timeout
+        yield {"event": "timeout", "data": json.dumps({"ticker": sym})}
+
+    return EventSourceResponse(event_gen())
+
+
+@router.delete("/deepdive/{ticker}/cache")
+async def deepdive_invalidate(ticker: str):
+    """Force-invalidate a cached deep-dive."""
+    sym = ticker.upper()
+    removed = invalidate_cache(sym)
+    return {"ticker": sym, "removed": removed}

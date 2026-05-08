@@ -67,7 +67,53 @@ export const api = {
     }),
   getFinanceTicker: (symbol: string) =>
     fetchJSON<FinanceTickerSnapshot>(`/finance/ticker/${symbol}`),
+
+  // ── Deep-dive ──────────────────────────────────────────────────────────
+  getDeepdive: (ticker: string) =>
+    fetchJSON<DeepDive>(`/finance/deepdive/${ticker}`),
+  getDeepdiveStatus: (ticker: string) =>
+    fetchJSON<DeepDiveStatus>(`/finance/deepdive/${ticker}/status`),
+  generateDeepdive: (ticker: string, force = false) =>
+    fetchJSON<{ ticker: string; status: string; stream_url: string | null; message: string }>(
+      `/finance/deepdive/${ticker}/generate`,
+      { method: "POST", body: JSON.stringify({ force }) },
+    ),
+  invalidateDeepdive: (ticker: string) =>
+    fetchJSON<{ ticker: string; removed: boolean }>(
+      `/finance/deepdive/${ticker}/cache`,
+      { method: "DELETE" },
+    ),
 };
+
+export interface DeepDiveSection {
+  anchor: string;
+  title: string;
+  body: string;
+}
+
+export interface DeepDive {
+  ticker: string;
+  is_crypto: boolean;
+  generated_at: string;
+  ttl_until: string;
+  duration_seconds: number;
+  markdown: string;
+  sections: DeepDiveSection[];
+  error: string | null;
+  data_source_status: Record<string, boolean>;
+  cache_status: string;
+  stale_reason: string | null;
+}
+
+export interface DeepDiveStatus {
+  ticker: string;
+  status: "not_found" | "cached_fresh" | "cached_stale" | "generating" | "failed";
+  phase?: string;
+  generated_at?: string | null;
+  ttl_until?: string | null;
+  stale_reason?: string | null;
+  events?: Array<{ ts: string; status: string; phase?: string }>;
+}
 
 export interface FinanceBrief {
   trading_date: string;

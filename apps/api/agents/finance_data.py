@@ -185,6 +185,63 @@ class EdgarClient:
         """
         return []
 
+    def filings_full(
+        self,
+        ticker: str,
+        form_types: tuple[str, ...] = ("10-K", "10-Q", "8-K", "DEF 14A"),
+        days_back: int = 180,
+    ) -> list[dict]:
+        """All filings of given form types in the last N days.
+
+        Different from `recent_filings` (which caps at 6 entries): this returns
+        the full set inside a date window, used by the deep-dive's "recent
+        filings (last 90 days)" section.
+        """
+        cik = self.lookup_cik(ticker)
+        if not cik:
+            raise DataSourceError("edgar", "not_found", f"no CIK for {ticker}")
+        sub = self._get_json(f"{self.BASE}/submissions/CIK{cik}.json")
+        recent = sub.get("filings", {}).get("recent", {})
+        forms = recent.get("form", [])
+        dates = recent.get("filingDate", [])
+        accessions = recent.get("accessionNumber", [])
+        primary_docs = recent.get("primaryDocument", [])
+        cutoff = date.today() - timedelta(days=days_back)
+        cik_int = int(cik)
+        out = []
+        for i, form in enumerate(forms):
+            if form not in form_types:
+                continue
+            try:
+                fd = date.fromisoformat(dates[i])
+            except (ValueError, IndexError):
+                continue
+            if fd < cutoff:
+                continue
+            acc = accessions[i] if i < len(accessions) else ""
+            acc_compact = acc.replace("-", "")
+            doc = primary_docs[i] if i < len(primary_docs) else ""
+            out.append({
+                "form": form,
+                "filing_date": dates[i],
+                "accession_number": acc,
+                "primary_doc": doc,
+                "primary_doc_url": (
+                    f"https://www.sec.gov/Archives/edgar/data/{cik_int}/{acc_compact}/{doc}"
+                    if acc_compact and doc else ""
+                ),
+            })
+        return out
+
+    def form4_activity(self, ticker: str, days_back: int = 180) -> list[dict]:
+        """Form 4 (insider trading) filings in the last N days.
+
+        EDGAR's submissions endpoint includes Form 4s mixed with everything
+        else. We filter and surface them here. Deep-dive uses this when FMP's
+        insider feed is unavailable.
+        """
+        return self.filings_full(ticker, form_types=("4",), days_back=days_back)
+
 
 # ────────────────────────────────────────────────────────────────────────────
 # FRED — macro context (free key required)
@@ -353,6 +410,138 @@ class FmpClient:
         if isinstance(data, list):
             return data[:1]  # latest quarter snapshot only
         return []
+
+    # ── Deep-dive additions ──────────────────────────────────────────────
+
+    def transcript(self, ticker: str, year: Optional[int] = None, quarter: Optional[int] = None) -> dict:
+        """Earnings call transcript. Default: latest available.
+
+        FMP requires the $30+/mo plan for transcripts. On free/basic plans
+        this raises DataSourceError("missing_plan") — the caller should
+        skip the transcript section gracefully.
+        """
+        params = {}
+        if year is not None:
+            params["year"] = year
+        if quarter is not None:
+            params["quarter"] = quarter
+        data = self._get(f"earning_call_transcript/{ticker}", **params)
+        if isinstance(data, list) and data:
+            return data[0]
+        if isinstance(data, dict):
+            return data
+        raise DataSourceError("fmp", "missing_plan", "transcripts require FMP $30+/mo plan")
+
+    def earnings_history(self, ticker: str, quarters: int = 4) -> list[dict]:
+        """Last N quarters of reported vs estimated EPS + revenue."""
+        data = self._get(f"earnings-surprises/{ticker}")
+        if isinstance(data, list):
+            return data[:quarters]
+        raise DataSourceError("fmp", "parse_error", str(type(data)))
+
+    def analyst_estimates(self, ticker: str) -> dict:
+        """Consensus + revisions trend. Returns target_low/median/high + rev counts."""
+        try:
+            estimates = self._get(f"analyst-estimates/{ticker}", limit=4)
+            recs = self._get(f"upgrades-downgrades-consensus/{ticker}")
+        except DataSourceError:
+            raise
+        consensus = recs[0] if isinstance(recs, list) and recs else {}
+        return {
+            "consensus_recommendation": consensus.get("consensus"),
+            "strongBuy": consensus.get("strongBuy"),
+            "buy": consensus.get("buy"),
+            "hold": consensus.get("hold"),
+            "sell": consensus.get("sell"),
+            "strongSell": consensus.get("strongSell"),
+            "annual_estimates": estimates if isinstance(estimates, list) else [],
+        }
+
+    def upgrades_downgrades(self, ticker: str, limit: int = 20) -> list[dict]:
+        """Recent sell-side upgrades/downgrades."""
+        try:
+            data = self._get(
+                "upgrades-downgrades",
+                base=self.BASE_V4,
+                symbol=ticker,
+                limit=limit,
+            )
+        except DataSourceError:
+            return []
+        return data if isinstance(data, list) else []
+
+    def institutional_holders(self, ticker: str, top_n: int = 10) -> list[dict]:
+        """Top N institutional holders + position size from 13F."""
+        try:
+            data = self._get(f"institutional-holder/{ticker}")
+        except DataSourceError:
+            return []
+        if isinstance(data, list):
+            # FMP returns a flat list — sort by value/shares descending
+            sorted_holders = sorted(
+                data,
+                key=lambda h: h.get("shares") or 0,
+                reverse=True,
+            )
+            return sorted_holders[:top_n]
+        return []
+
+    def insider_trades(self, ticker: str, days_back: int = 180) -> list[dict]:
+        """Form 4 transactions in the last N days."""
+        try:
+            data = self._get(
+                "insider-trading",
+                base=self.BASE_V4,
+                symbol=ticker,
+                page=0,
+            )
+        except DataSourceError:
+            return []
+        if not isinstance(data, list):
+            return []
+        cutoff = date.today() - timedelta(days=days_back)
+        recent: list[dict] = []
+        for tx in data:
+            try:
+                tx_date = date.fromisoformat((tx.get("transactionDate") or "")[:10])
+                if tx_date >= cutoff:
+                    recent.append(tx)
+            except ValueError:
+                continue
+        return recent
+
+    def segment_breakdown(self, ticker: str) -> dict:
+        """Revenue by segment + by geography (latest annual)."""
+        try:
+            by_segment = self._get(
+                f"revenue-product-segmentation",
+                base=self.BASE_V4,
+                symbol=ticker,
+                structure="flat",
+                period="annual",
+            )
+            by_region = self._get(
+                f"revenue-geographic-segmentation",
+                base=self.BASE_V4,
+                symbol=ticker,
+                structure="flat",
+                period="annual",
+            )
+        except DataSourceError:
+            return {"segments": {}, "regions": {}}
+        latest_segment = by_segment[0] if isinstance(by_segment, list) and by_segment else {}
+        latest_region = by_region[0] if isinstance(by_region, list) and by_region else {}
+        return {
+            "segments": next(iter(latest_segment.values()), {}) if latest_segment else {},
+            "regions": next(iter(latest_region.values()), {}) if latest_region else {},
+        }
+
+    def company_profile(self, ticker: str) -> dict:
+        """Company profile: sector, industry, description, website, employees."""
+        data = self._get(f"profile/{ticker}")
+        if isinstance(data, list) and data:
+            return data[0]
+        raise DataSourceError("fmp", "not_found", ticker)
 
 
 # ────────────────────────────────────────────────────────────────────────────
@@ -523,3 +712,93 @@ class FinanceClients:
             "polygon": self.polygon.configured,
             "coingecko": True,  # no key needed
         }
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# Sector → FRED-series mapping for the deep-dive's macro context
+# ────────────────────────────────────────────────────────────────────────────
+
+
+SECTOR_MACRO_DRIVERS: dict[str, list[str]] = {
+    # Each entry maps a sector to FRED series IDs that historically matter
+    # most for revenue/margin trajectory. The agent uses these to write
+    # section 7's "macro exposure" subsection.
+    "Technology":              ["DGS10", "DTWEXBGS"],            # rates, dollar
+    "Information Technology":  ["DGS10", "DTWEXBGS"],
+    "Communication Services":  ["DGS10", "VIXCLS"],
+    "Consumer Cyclical":       ["UMCSENT", "DGS10"],             # sentiment, rates
+    "Consumer Discretionary":  ["UMCSENT", "DGS10"],
+    "Consumer Defensive":      ["CPIAUCSL"],                     # CPI
+    "Consumer Staples":        ["CPIAUCSL"],
+    "Healthcare":              ["DGS10"],
+    "Financial Services":      ["DGS10", "T10Y2Y", "DFF"],       # yield curve
+    "Financials":              ["DGS10", "T10Y2Y", "DFF"],
+    "Energy":                  ["DCOILWTICO", "DTWEXBGS"],       # WTI, dollar
+    "Industrials":             ["INDPRO", "DGS10"],              # industrial production
+    "Basic Materials":         ["INDPRO", "DTWEXBGS"],
+    "Real Estate":             ["DGS10", "MORTGAGE30US"],
+    "Utilities":               ["DGS10"],
+}
+
+
+def macro_drivers_for(sector: str) -> list[str]:
+    """Return FRED series IDs that matter most for a given sector."""
+    if not sector:
+        return ["DGS10"]
+    return SECTOR_MACRO_DRIVERS.get(sector, ["DGS10"])
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# Per-call TTL cache — keeps deep-dive regenerations from re-hitting every API
+# ────────────────────────────────────────────────────────────────────────────
+
+
+class _TTLCache:
+    """Tiny in-memory TTL cache shared across deep-dive regenerations.
+
+    Not persisted: process restart clears it. Sufficient for the use case —
+    a deep-dive's data calls during a single regeneration won't span restarts.
+    """
+
+    def __init__(self) -> None:
+        self._store: dict[tuple[str, tuple], tuple[float, object]] = {}
+
+    def get(self, fn_name: str, args: tuple, ttl_seconds: float) -> Optional[object]:
+        key = (fn_name, args)
+        entry = self._store.get(key)
+        if not entry:
+            return None
+        ts, value = entry
+        if time.time() - ts > ttl_seconds:
+            self._store.pop(key, None)
+            return None
+        return value
+
+    def put(self, fn_name: str, args: tuple, value: object) -> None:
+        self._store[(fn_name, args)] = (time.time(), value)
+
+
+_data_cache = _TTLCache()
+
+
+# Per-data-type TTLs, in seconds.
+TTL_PRICE = 300        # 5 min
+TTL_FILINGS = 3600     # 1 hr
+TTL_FUNDAMENTALS = 21600  # 6 hr
+TTL_MACRO = 3600       # 1 hr
+TTL_TRANSCRIPTS = 86400   # 24 hr
+
+
+def cached(fn_name: str, ttl: float):
+    """Decorator factory: cache `fn(*args)` for `ttl` seconds keyed on args."""
+    def deco(fn):
+        def wrapper(*args, **kwargs):
+            key_args = args + tuple(sorted(kwargs.items()))
+            hit = _data_cache.get(fn_name, key_args, ttl)
+            if hit is not None:
+                return hit
+            value = fn(*args, **kwargs)
+            _data_cache.put(fn_name, key_args, value)
+            return value
+        return wrapper
+    return deco
