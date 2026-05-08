@@ -48,7 +48,72 @@ export const api = {
   cleanupJob: (jobId: number) =>
     fetchJSON<{ ok: boolean }>(`/jobs/${jobId}/cleanup`, { method: "POST" }),
   getAgentModels: () => fetchJSON<Record<string, string>>("/agents/models"),
+
+  // ── Finance tab ─────────────────────────────────────────────────────────
+  getFinanceBrief: () => fetchJSON<FinanceBrief>("/finance/brief"),
+  regenerateFinanceBrief: () =>
+    fetchJSON<FinanceBrief>("/finance/brief/regenerate", { method: "POST" }),
+  getFinanceStatus: () => fetchJSON<FinanceStatus>("/finance/status"),
+  getFinanceWatchlist: () =>
+    fetchJSON<{ tickers: string[] }>("/finance/watchlist"),
+  addFinanceTicker: (ticker: string) =>
+    fetchJSON<{ tickers: string[] }>("/finance/watchlist", {
+      method: "POST",
+      body: JSON.stringify({ ticker }),
+    }),
+  removeFinanceTicker: (ticker: string) =>
+    fetchJSON<{ tickers: string[] }>(`/finance/watchlist/${ticker}`, {
+      method: "DELETE",
+    }),
+  getFinanceTicker: (symbol: string) =>
+    fetchJSON<FinanceTickerSnapshot>(`/finance/ticker/${symbol}`),
 };
+
+export interface FinanceBrief {
+  trading_date: string;
+  markdown: string | null;
+  generated_at: string | null;
+  duration_seconds?: number;
+  error?: string | null;
+  data_source_status?: Record<string, boolean>;
+  skipped_sections?: string[];
+}
+
+export interface FinanceStatus {
+  data_source_status: Record<string, boolean>;
+  watchlist_size: number;
+  last_brief_generated_at: string | null;
+  last_brief_duration_seconds: number | null;
+  last_brief_trading_date: string | null;
+}
+
+export interface FinanceTickerSnapshot {
+  ticker: string;
+  name?: string;
+  price?: number;
+  market_cap?: number;
+  forward_pe?: number;
+  pe_5y_median?: number;
+  pe_10y_median?: number;
+  ev_ebitda?: number;
+  ev_ebitda_5y_median?: number;
+  ps?: number;
+  ps_5y_median?: number;
+  peers?: string[];
+  peer_pe_median?: number;
+  peer_ev_ebitda_median?: number;
+  peer_ps_median?: number;
+  implied_dcf_growth_pct?: number;
+  actual_3y_revenue_cagr_pct?: number;
+  earnings_in_days?: number | null;
+  history_warning?: string | null;
+  recent_filings?: Array<{
+    form: string;
+    filing_date: string;
+    primary_doc_url: string;
+  }>;
+  warning?: string;
+}
 
 export function streamJobLog(jobId: number, onLine: (line: string) => void): () => void {
   const es = new EventSource(`${API_BASE}/jobs/${jobId}/log`);

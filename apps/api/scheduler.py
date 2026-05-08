@@ -127,6 +127,47 @@ class SchedulerService:
         except Exception as e:
             print(f"[scheduler] wiki digest error: {e}")
 
+    async def _run_finance_brief(self) -> None:
+        """5am ET finance brief — runs the screen, asks the agent to write up."""
+        try:
+            from agents.finance_brief import generate_brief
+            brief = await generate_brief(use_cache=False)
+            status = "ok" if not brief.error else f"error: {brief.error}"
+            print(
+                f"[scheduler] finance brief {status} "
+                f"({brief.duration_seconds}s, {len(brief.markdown)} chars)"
+            )
+        except Exception as e:
+            print(f"[scheduler] finance brief error: {e}")
+
+    def register_finance_brief(self) -> None:
+        """Register the finance brief job at 5am America/New_York.
+
+        Separate from set_schedule() because that path is a generic
+        agent-runner; finance has its own pre-screen step. Uses tz so the
+        cron stays at 5am ET regardless of DST.
+        """
+        try:
+            from zoneinfo import ZoneInfo
+            tz = ZoneInfo("America/New_York")
+        except Exception:
+            tz = None
+        job_id = "finance-brief"
+        if self._scheduler.get_job(job_id):
+            return
+        try:
+            trigger = CronTrigger(hour=5, minute=0, timezone=tz) if tz else CronTrigger(hour=10, minute=0)
+            self._scheduler.add_job(
+                self._run_finance_brief,
+                trigger=trigger,
+                id=job_id,
+                replace_existing=True,
+            )
+            self._schedules["finance-brief"] = "0 5 * * * America/New_York"
+            print("[scheduler] Registered default: finance-brief @ 5am ET")
+        except Exception as e:
+            print(f"[scheduler] Failed to register finance brief: {e}")
+
     async def _run_agent(self, agent_id: str) -> None:
         """Execute an agent's scheduled run with full Job/AgentRun persistence."""
         from datetime import datetime
