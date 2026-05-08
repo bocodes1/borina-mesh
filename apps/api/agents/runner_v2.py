@@ -40,6 +40,12 @@ AGENT_REGISTRY: dict[str, dict] = {
     "polymarket": {"long_id": "polymarket-intel"},
     "researcher": {"long_id": "researcher"},
     "adset":      {"long_id": "adset-optimizer"},
+    # Finance gets a fixed workdir (not pane-prefixed) so its CLAUDE.md +
+    # BRIEF_FORMAT.md specs travel with the agent rather than per pane.
+    "finance":    {
+        "long_id": "finance",
+        "workdir": str(Path.home() / ".borina" / "agents" / "finance"),
+    },
 }
 
 
@@ -175,7 +181,11 @@ async def run_agent_task(
         system_prompt = _resolve_system_prompt(agent_id) or (
             f"You are the {agent_id} agent of Borina Mesh."
         )
-        workdir = str(_workdir_root() / agent_id)
+        # AGENT_REGISTRY may pin an agent to a fixed workdir (e.g. finance,
+        # whose CLAUDE.md + BRIEF_FORMAT specs live in one canonical location).
+        # Otherwise default to the per-pane scratch dir.
+        registry_entry = AGENT_REGISTRY.get(agent_id, {})
+        workdir = registry_entry.get("workdir") or str(_workdir_root() / agent_id)
 
         if fresh_context and sup.session_exists(agent_id):
             sup.kill(agent_id)
