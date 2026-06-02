@@ -115,3 +115,14 @@ build and to be **restored at the end**. Tests/dev servers use non-live ports (p
   a "Connect X" empty state) above the existing brief/watchlist.
 - Navbar: added Daily + Calendar (spec §1 order); Polymarket kept.
 - **Verified:** `tsc --noEmit` clean; `npm run build` clean — `/daily` + `/calendar` now in the route list.
+
+## 2026-06-02 — Step 10: Frontend test suite + mobile pass (Task #10) ✅
+- vitest.setup polyfills: EventSource (SSE tabs), default fetch stub.
+- `test/new-tabs.test.tsx`: /daily, /calendar, finance-portfolio each in **loading + data + empty + error**
+  (12 tests), asserting no raw "undefined" leaks.
+- `test/existing-tabs.test.tsx`: Mesh/Network/Analytics/Jobs/Artifacts render-smoke (mocked API → loading,
+  NetworkGraph stubbed for jsdom). They ship their own empty/error branches in app code.
+- `test/mobile.test.tsx`: all 7 page tabs mount at 375px without throwing.
+- `test/navbar-terminal.test.tsx`: /terminal regression guard (from §1).
+- **Frontend suite green: 33 passed (6 files).** Nav collapses to icons on mobile via `hidden sm:inline`
+  (CSS responsive) + responsive grids on the new tabs.

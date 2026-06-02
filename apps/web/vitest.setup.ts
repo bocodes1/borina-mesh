@@ -33,4 +33,25 @@ if (typeof window !== "undefined") {
     };
 
   Element.prototype.scrollIntoView = Element.prototype.scrollIntoView || (() => {});
+
+  // jsdom has no EventSource; several tabs open SSE streams on mount.
+  if (typeof (window as unknown as { EventSource?: unknown }).EventSource === "undefined") {
+    (window as unknown as { EventSource: unknown }).EventSource = class {
+      onmessage: ((e: unknown) => void) | null = null;
+      onerror: ((e: unknown) => void) | null = null;
+      close() {}
+      addEventListener() {}
+      removeEventListener() {}
+    };
+    (globalThis as unknown as { EventSource: unknown }).EventSource = (window as unknown as {
+      EventSource: unknown;
+    }).EventSource;
+  }
+
+  // Default fetch stub so any un-mocked direct fetch resolves to empty JSON
+  // instead of throwing. Per-test mocks override this.
+  if (typeof globalThis.fetch === "undefined") {
+    (globalThis as unknown as { fetch: unknown }).fetch = () =>
+      Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve([]), text: () => Promise.resolve("") });
+  }
 }
