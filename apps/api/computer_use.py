@@ -35,7 +35,7 @@ class ComputerUseSession:
 
     def __init__(
         self,
-        model: str = "claude-opus-4-6",
+        model: str = "claude-opus-4-8",
         display_width: int = 1920,
         display_height: int = 1080,
         display_number: int = 0,

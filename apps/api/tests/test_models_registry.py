@@ -10,7 +10,7 @@ def test_registry_contains_all_agents():
     assert expected.issubset(AGENT_MODELS.keys())
 
 def test_resolve_model_returns_registry_value():
-    assert resolve_model("ceo") == "claude-opus-4-6"
+    assert resolve_model("ceo") == "claude-opus-4-8"
     assert resolve_model("inbox-triage") == "claude-haiku-4-5-20251001"
 
 def test_env_override_wins(monkeypatch):
@@ -26,5 +26,5 @@ def test_agents_models_endpoint():
     r = client.get("/agents/models")
     assert r.status_code == 200
     data = r.json()
-    assert data["ceo"] == "claude-opus-4-6"
+    assert data["ceo"] == "claude-opus-4-8"
     assert data["inbox-triage"] == "claude-haiku-4-5-20251001"

@@ -77,6 +77,9 @@ app.add_middleware(
 
 app.include_router(agents_routes.router)
 app.include_router(chat_routes.router)
+# stats must register before jobs: GET /jobs/stats would otherwise be shadowed
+# by GET /jobs/{job_id} (job_id:int) and 422 on the literal "stats".
+app.include_router(stats_routes.router)
 app.include_router(jobs_routes.router)
 app.include_router(activity_routes.router)
 app.include_router(schedules_routes.router)
@@ -89,7 +92,6 @@ app.include_router(memory_routes.router)
 app.include_router(workspace_routes.router)
 app.include_router(threads_routes.router)
 app.include_router(tasks_routes.router)
-app.include_router(stats_routes.router)
 app.include_router(finance_routes.router)
 app.include_router(sessions_router, prefix="/api/sessions", tags=["sessions"])
 

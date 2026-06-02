@@ -31,7 +31,6 @@ Report style rules:
 - Flag issues with severity: RED (needs fix now), YELLOW (watch), GREEN (fine).
 - If you recommend a fix, include the specific action: file, line, change."""
     tools = ["read_file", "write_file"]
-    model = "claude-opus-4-6"
 
 
 registry.register(InboxTriageAgent)
