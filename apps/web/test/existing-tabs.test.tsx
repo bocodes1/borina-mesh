@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
+import type { ComponentType } from "react";
 import { render, screen } from "@testing-library/react";
 
 // All API calls hang (pending) → every page sits in its loading state, which is
@@ -20,7 +21,7 @@ import AnalyticsPage from "@/app/analytics/page";
 import JobsPage from "@/app/jobs/page";
 import ArtifactsPage from "@/app/artifacts/page";
 
-const pages: Array<[string, () => JSX.Element]> = [
+const pages: Array<[string, ComponentType]> = [
   ["Mesh", MeshPage],
   ["Network", NetworkPage],
   ["Analytics", AnalyticsPage],

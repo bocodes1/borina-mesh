@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeAll } from "vitest";
+import type { ComponentType } from "react";
 import { render } from "@testing-library/react";
 
 // Everything pending → tabs mount in their loading state at a phone viewport.
@@ -24,7 +25,7 @@ beforeAll(() => {
   Object.defineProperty(window, "innerHeight", { writable: true, configurable: true, value: 667 });
 });
 
-const tabs: Array<[string, () => JSX.Element]> = [
+const tabs: Array<[string, ComponentType]> = [
   ["Mesh", MeshPage],
   ["Network", NetworkPage],
   ["Analytics", AnalyticsPage],

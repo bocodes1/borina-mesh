@@ -126,3 +126,14 @@ build and to be **restored at the end**. Tests/dev servers use non-live ports (p
 - `test/navbar-terminal.test.tsx`: /terminal regression guard (from §1).
 - **Frontend suite green: 33 passed (6 files).** Nav collapses to icons on mobile via `hidden sm:inline`
   (CSS responsive) + responsive grids on the new tabs.
+
+## 2026-06-02 — Step 9: Existing-tab restyle against tokens (Task #9) ◑
+- **Analytics fully rebuilt** on the design system: KPI strip → `KpiCard`, sections → `SectionHeader`,
+  per-agent breakdown → `DataTable`, proper `SkeletonKpiStrip`/`EmptyState`/`ErrorState` via `useAsync`
+  (previously swallowed errors into a bare "No data" string). tsc + build clean; smoke tests still green.
+- The other existing tabs (Mesh/Network/Jobs/Artifacts) retain their working glass/violet styling, which is
+  already cohesive with the new tokens (the new `--brand` accent IS the existing violet primary) and the shared
+  primitives are now available to them. **Honest scope note:** a deeper pixel-level rebuild of those four was
+  deliberately not done — it carries regression risk for working, tested UI and is outside the Tier-1 "done" bar
+  (build/typecheck/tests green + every tab renders in 3 states). Flagged as optional design polish in the hand-off.
+- Fixed test typing (`JSX.Element` → `ComponentType`) for the new React 19 JSX transform.
