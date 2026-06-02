@@ -137,3 +137,51 @@ build and to be **restored at the end**. Tests/dev servers use non-live ports (p
   deliberately not done — it carries regression risk for working, tested UI and is outside the Tier-1 "done" bar
   (build/typecheck/tests green + every tab renders in 3 states). Flagged as optional design polish in the hand-off.
 - Fixed test typing (`JSX.Element` → `ComponentType`) for the new React 19 JSX transform.
+
+## 2026-06-02 — Step 11: Final verification + hand-off (Task #11) ✅
+
+### Verification results (§10)
+- **Backend** `pytest -q` → **149 passed** (1 benign deprecation warning).
+- **Frontend** `npx tsc --noEmit` → clean; `npm run build` → clean (all routes incl. /daily, /calendar; no /terminal);
+  `npm test` → **33 passed** (6 files).
+- **Live boot** (API on :8001 with an isolated DB, since the production service holds :8000): `/health` ok;
+  `/finance/portfolio`, `/daily/summary`, `/calendar/events`, `/tasks`, `/finance/quote/AAPL` all **200**;
+  telegram webhook with no secret → **403** (fail-closed); `/docs` 200; `POST /daily/generate?use_agent=false`
+  wrote all **9** brief sections. No boot errors.
+- **`scripts/dev.sh`**: boots uvicorn :8000 + next :3000 — those ports are intentionally held by the running
+  production launchd services (left up for the whole build), so the equivalent boot was proven via the :8001 run
+  + the clean production build. Run dev.sh after stopping the prod services if you want the canonical ports.
+- Production services confirmed healthy and **untouched** throughout (api :8000 / web :3000 → 200).
+
+### Tier-1 (autonomous-complete) — DONE
+- ✅ 8 spec tabs render in loading/empty/error; Terminal route gone (deleted + nav guard test).
+- ✅ `npm run build` clean, `tsc --noEmit` clean.
+- ✅ Backend pytest (149) + frontend npm test (33) green — incl. Telegram allow-list/fail-closed/secret-token/
+  forbidden-action tests + intent-router worked example, all against mocks + simulated Telegram updates.
+- ✅ Boot verified (alt port); schedule_daily triggers manually and writes a parseable 9-section brief the
+  Finance/Daily/Calendar tabs read.
+- ✅ BUILD_LOG reflects every step; hand-off below.
+
+### Tier-2 — needs Bo (live credentials + real device; NOT faked)
+- [ ] Fill real keys in `apps/api/.env`: `MARKET_DATA_API_KEY`, `BROKERAGE_API_KEY/SECRET`, `WALLET_ADDRESSES`,
+      `GOOGLE_OAUTH_CLIENT_ID/SECRET/REDIRECT_URI` (+ token after consent), `WEATHER_API_KEY`, `HOME_LAT/LON`,
+      `TELEGRAM_ALLOWED_CHAT_IDS` (= Bo's chat_id 6452258223), `TELEGRAM_WEBHOOK_SECRET`, `MESH_PUBLIC_HOST`
+      (= wenbos-mac-mini.tail254f60.ts.net:3000). `TELEGRAM_BOT_TOKEN` already set.
+- [ ] Register the Telegram webhook to the Tailscale-internal URL with the secret-token header:
+      `setWebhook` → `http://wenbos-mac-mini.tail254f60.ts.net:8000/api/telegram/webhook`, `secret_token=<TELEGRAM_WEBHOOK_SECRET>`.
+      NOTE: the existing `com.wenbo.borina-bridge` polls @borinabot via getUpdates — getUpdates and a webhook are
+      mutually exclusive on one bot. Pick one (retire the bridge, or use a second bot for dispatch).
+- [ ] Complete Google OAuth consent once (populates the server-side token).
+- [ ] Live test: text the bot "verify the daily report of my stocks and tell me if there's any new news on my
+      investments" → expect ack → PDF reply + the same PDF in /artifacts tagged source:telegram.
+- [ ] Confirm a message from any OTHER Telegram account is silently ignored.
+
+### Deploy note
+Built on branch `feature/frontend-rebuild` (10 commits), live services left on `main`. To ship: review the branch,
+merge to `main`, then `cd apps/api && .venv/bin/pip install -r requirements.txt` (claude-agent-sdk/weasyprint dep set),
+`cd apps/web && npm install && npm run build`, then `launchctl kickstart -k gui/$(id -u)/com.borina.mesh-{api,web}`.
+The auto-updater (`com.borina.mesh-updater`) was paused for the build and has been **restored**.
+
+### Optional design polish (not blocking)
+- Deeper visual rebuild of Mesh/Network/Jobs/Artifacts onto the shared primitives (Analytics already done).
+- Live LLM-orchestrated daily brief (currently deterministic fallback when no agent/keys).
