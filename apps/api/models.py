@@ -53,3 +53,20 @@ class AgentConfig(SQLModel, table=True):
     enabled: bool = True
     schedule_cron: Optional[str] = None
     last_run_at: Optional[datetime] = None
+
+
+# Allowed task tags (spec §5.3) — validated at the route layer.
+TASK_TAGS = ("work", "borina", "trading", "personal")
+TASK_PRIORITIES = ("low", "medium", "high")
+
+
+class Task(SQLModel, table=True):
+    """A personal task backing the /daily tab's task column."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    title: str
+    due: Optional[datetime] = Field(default=None, index=True)
+    priority: str = Field(default="medium")          # low | medium | high
+    tag: str = Field(default="personal", index=True)  # work | borina | trading | personal
+    done: bool = Field(default=False, index=True)
+    sort_order: int = Field(default=0)
+    created_at: datetime = Field(default_factory=datetime.utcnow, index=True)

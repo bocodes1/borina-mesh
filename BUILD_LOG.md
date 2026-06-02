@@ -61,3 +61,16 @@ build and to be **restored at the end**. Tests/dev servers use non-live ports (p
   only write path and is unreachable from an agent/auto path.
 - Extended `.env.example` with all §7 keys (MARKET_DATA/BROKERAGE/WALLET/GOOGLE_OAUTH/WEATHER/HOME_*).
 - **Tests pass:** `test_integrations.py` → 14 passed (not-connected, mocked-OK, never-raises, calendar refusal).
+
+## 2026-06-02 — Step 5: Backend routers finance+/daily/calendar/tasks (Task #5) ✅
+- `daily_brief.py`: section parser (`<section id="…">` → dict) + load/save for `reports/{day}/daily-brief.md`;
+  one source of truth the Finance/Daily/Calendar tabs read from.
+- `models.Task` (+ TASK_TAGS/TASK_PRIORITIES). Watchlist kept on existing JSON store (already persists;
+  not re-platformed to SQLModel to stay surgical — noted as a deliberate deviation from §4's "SQLModel").
+- `routes/tasks.py` (real CRUD at `/tasks`, replacing the `/api/tasks` stub — that prefix was unreachable
+  through the Next `/api/*`→`/*` proxy), `routes/daily.py` (`/daily/summary` = brief sections + weather + open tasks),
+  `routes/calendar.py` (`/calendar/events` read + **create gated on user_initiated → 403 otherwise**),
+  `routes/finance_lifeos.py` (second `/finance` router: portfolio/quote/history/news/morning — existing finance.py untouched).
+- Registered all in `main.py`.
+- **Tests pass:** `test_daily_routes` + `test_calendar_routes` + `test_finance_routes` → 15 passed.
+  Full backend suite → **121 passed**.
