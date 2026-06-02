@@ -1,0 +1,55 @@
+"""Pytest bootstrap: isolate the test database from the live borina.db.
+
+db.py reads DATABASE_URL at import time, so this must run before any
+`import db` / `import main`. conftest is imported by pytest before test
+modules, so setting the env var here points every test at a throwaway DB
+and leaves the production borina.db (used by the running service) untouched.
+"""
+import os
+import pathlib
+import tempfile
+
+_TEST_DB = pathlib.Path(tempfile.gettempdir()) / "borina_test.db"
+# Start from a clean schema each session.
+try:
+    _TEST_DB.unlink()
+except FileNotFoundError:
+    pass
+
+os.environ["DATABASE_URL"] = f"sqlite:///{_TEST_DB}"
+
+# Isolate filesystem-backed state from the real machine so tests are hermetic
+# and never see (or write) the live obsidian-vault or reports dir. The vault is
+# disabled by default (empty) — individual tests that exercise the wiki/vault
+# set their own OBSIDIAN_VAULT_PATH via monkeypatch.
+_TEST_REPORTS = pathlib.Path(tempfile.mkdtemp(prefix="borina_test_reports_"))
+os.environ["OBSIDIAN_VAULT_PATH"] = ""
+os.environ["REPORTS_DIR"] = str(_TEST_REPORTS)
+
+# Deterministic, credential-free defaults so integration wrappers take their
+# "not connected" path and tests never reach a real external service.
+os.environ.setdefault("CORS_ORIGINS", "http://localhost:3000")
+os.environ.setdefault("INTENT_CONFIDENCE_THRESHOLD", "0.6")
+
+import pytest  # noqa: E402
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _init_test_db():
+    """Create tables once for the isolated DB."""
+    from db import init_db
+
+    init_db()
+    yield
+
+
+@pytest.fixture(autouse=True)
+def _isolate_fs_env(monkeypatch):
+    """Reset filesystem-backed env before every test so cross-test leakage
+    (e.g. test_wiki_routes sets OBSIDIAN_VAULT_PATH at module import) can't
+    bleed real artifacts into hermetic tests. Tests that need a vault/reports
+    dir override these with their own monkeypatch in-body (runs after this).
+    """
+    monkeypatch.setenv("OBSIDIAN_VAULT_PATH", "")
+    monkeypatch.setenv("REPORTS_DIR", str(_TEST_REPORTS))
+    yield

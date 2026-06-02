@@ -13,6 +13,9 @@ def _init_repo(path: Path):
     subprocess.run(["git", "add", "."], cwd=path, check=True)
     subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t",
                     "commit", "-m", "init"], cwd=path, check=True)
+    # Normalize the default branch to `master` so the test is independent of
+    # the host's init.defaultBranch (newer git defaults to `main`).
+    subprocess.run(["git", "branch", "-M", "master"], cwd=path, check=True)
 
 
 def test_worker_creates_worktree_and_runs(tmp_path, monkeypatch):
