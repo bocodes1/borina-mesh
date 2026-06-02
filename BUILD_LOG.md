@@ -86,3 +86,19 @@ build and to be **restored at the end**. Tests/dev servers use non-live ports (p
   manual generate writes a parseable brief all three tabs read) → 3 passed. Full backend suite → **124 passed**.
 - §12 Tier-1 "schedule_daily triggers manually + tabs parse it" ✓ (deterministic path). Live agent-orchestrated
   brief (real keys + claude CLI) is the Tier-2 enrichment in the hand-off.
+
+## 2026-06-02 — Step 7: Autonomous Telegram dispatch (Task #7) ✅
+- `dispatch/intent.py`: forbidden-action gate FIRST (buy/sell/transfer/withdraw/send/delete/calendar-create/
+  permission-change → refused), then deterministic alias match (the worked example "verify daily report of my
+  stocks + news" → researcher/finance_deep_dive with params), then guarded Haiku fallback; low confidence → clarify.
+- `dispatch/dispatcher.py`: intent → agent via tmux pool (injectable) → md→PDF (WeasyPrint) → artifact tagged
+  `source:telegram` (+ requested_at/prompt/agent meta sidecar) → Telegram summary+PDF+deep-link. Creates a
+  Job row (kind=telegram_dispatch) so it shows in /jobs. Read-only only.
+- `routes/telegram.py` `POST /api/telegram/webhook`: **secret-token header (fail closed → 403)** → **allow-list
+  (fail closed; non-Bo silently ignored)** → forbidden refusal → ack + background dispatch, returns 200 fast.
+- `.env.example` + TELEGRAM_ALLOWED_CHAT_IDS / TELEGRAM_WEBHOOK_SECRET / MESH_PUBLIC_HOST / INTENT_CONFIDENCE_THRESHOLD.
+- **Tests pass (security-critical):** `test_intent_router` (worked example, alias table, 7 forbidden cases, clarify,
+  llm fallback), `test_telegram_dispatch` (missing/wrong secret→403, non-allowlisted→ignored, empty-list fail-closed,
+  valid→enqueues researcher, forbidden→refused no-dispatch), `test_dispatcher` (source:telegram artifact retrievable
+  via artifacts API + real WeasyPrint render + job row) → 25 passed. Full backend suite → **149 passed**.
+- Live webhook registration + real agent run = Tier-2 hand-off (needs real bot token + Tailscale URL).
