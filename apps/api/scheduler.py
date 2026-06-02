@@ -140,6 +140,38 @@ class SchedulerService:
         except Exception as e:
             print(f"[scheduler] finance brief error: {e}")
 
+    async def _run_schedule_daily(self) -> None:
+        """Generate the daily brief and write reports/{today}/daily-brief.md."""
+        try:
+            from schedule_daily import generate_daily_brief
+            path = await generate_daily_brief(use_agent=True)
+            print(f"[scheduler] schedule_daily wrote {path}")
+        except Exception as e:
+            print(f"[scheduler] schedule_daily error: {e}")
+
+    def register_schedule_daily(self) -> None:
+        """Register the daily brief job at 6am America/New_York (spec §8)."""
+        try:
+            from zoneinfo import ZoneInfo
+            tz = ZoneInfo("America/New_York")
+        except Exception:
+            tz = None
+        job_id = "schedule-daily"
+        if self._scheduler.get_job(job_id):
+            return
+        try:
+            trigger = CronTrigger(hour=6, minute=0, timezone=tz) if tz else CronTrigger(hour=11, minute=0)
+            self._scheduler.add_job(
+                self._run_schedule_daily,
+                trigger=trigger,
+                id=job_id,
+                replace_existing=True,
+            )
+            self._schedules["schedule-daily"] = "0 6 * * * America/New_York"
+            print("[scheduler] Registered default: schedule-daily @ 6am ET")
+        except Exception as e:
+            print(f"[scheduler] Failed to register schedule_daily: {e}")
+
     def register_finance_brief(self) -> None:
         """Register the finance brief job at 5am America/New_York.
 

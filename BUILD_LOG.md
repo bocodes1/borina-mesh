@@ -74,3 +74,15 @@ build and to be **restored at the end**. Tests/dev servers use non-live ports (p
 - Registered all in `main.py`.
 - **Tests pass:** `test_daily_routes` + `test_calendar_routes` + `test_finance_routes` → 15 passed.
   Full backend suite → **121 passed**.
+
+## 2026-06-02 — Step 6: schedule_daily task + generation (Task #6) ✅
+- `schedule_daily.py`: stores the canonical XML task prompt verbatim; `generate_daily_brief()` prefers the
+  live researcher-agent path and always falls back to a deterministic 9-section builder assembled from local
+  data + integration statuses (says "unavailable" where unconnected — never fabricates). Writes
+  `reports/{today}/daily-brief.md`.
+- Registered `schedule-daily` cron @ 6am ET in the scheduler + lifespan. Manual trigger `POST /daily/generate`
+  (`use_agent=false` for verification) + `GET /daily/brief` (raw + parsed).
+- **Tests pass:** `test_daily_brief.py` (parser splits all 9; finance/daily/calendar each get their sections;
+  manual generate writes a parseable brief all three tabs read) → 3 passed. Full backend suite → **124 passed**.
+- §12 Tier-1 "schedule_daily triggers manually + tabs parse it" ✓ (deterministic path). Live agent-orchestrated
+  brief (real keys + claude CLI) is the Tier-2 enrichment in the hand-off.

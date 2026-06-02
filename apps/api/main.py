@@ -54,6 +54,7 @@ async def lifespan(app: FastAPI):
     scheduler_service.start()
     scheduler_service.register_defaults()
     scheduler_service.register_finance_brief()
+    scheduler_service.register_schedule_daily()
     yield
     scheduler_service.stop()
     print("Borina Mesh shutting down...")
