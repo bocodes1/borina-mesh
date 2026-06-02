@@ -50,3 +50,14 @@ build and to be **restored at the end**. Tests/dev servers use non-live ports (p
 - Regression guard `test/navbar-terminal.test.tsx`: navbar has no Terminal item / no `/terminal`
   link, core tabs still present. (404 behavior validated by route deletion + covered in §10b mobile/route pass.)
 - **Tests pass:** vitest guard green; `npm run build` clean (route list no longer includes `/terminal`).
+
+## 2026-06-02 — Step 4: integrations/ package (Task #4) ✅
+- New `apps/api/integrations/` with a shared envelope (`base.py`: `IntegrationResult`,
+  `ok`/`not_connected`/`safe` decorator, mockable `http_get_json`/`http_post_json`).
+- Providers, all READ-ONLY + graceful (return `connected=False` when unkeyed, never raise):
+  `market_data` (quote/history/fundamentals/news), `brokerage` (portfolio), `wallet` (balances),
+  `polymarket` (read-only surface of the local bot, no CEX-lag reimpl), `weather`, `google_calendar`.
+- **Safety:** `google_calendar.create_event` hard-refuses unless `user_initiated=True`; it's the
+  only write path and is unreachable from an agent/auto path.
+- Extended `.env.example` with all §7 keys (MARKET_DATA/BROKERAGE/WALLET/GOOGLE_OAUTH/WEATHER/HOME_*).
+- **Tests pass:** `test_integrations.py` → 14 passed (not-connected, mocked-OK, never-raises, calendar refusal).
