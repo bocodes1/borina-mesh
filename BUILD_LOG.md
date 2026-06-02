@@ -102,3 +102,16 @@ build and to be **restored at the end**. Tests/dev servers use non-live ports (p
   valid→enqueues researcher, forbidden→refused no-dispatch), `test_dispatcher` (source:telegram artifact retrievable
   via artifacts API + real WeasyPrint render + job row) → 25 passed. Full backend suite → **149 passed**.
 - Live webhook registration + real agent run = Tier-2 hand-off (needs real bot token + Tailscale URL).
+
+## 2026-06-02 — Step 8: New frontend tabs — finance+/daily/calendar (Task #8) ✅
+- `lib/api.ts` extended with typed helpers (portfolio/quote/history/news, daily summary/brief/generate,
+  tasks CRUD, calendar events/create) + Life-OS response types. `lib/use-async.ts` shared fetch-state hook
+  so every new tab implements loading/empty/error uniformly (and is trivially mockable in tests).
+- `/daily`: Today header (date + weather + tldr), interactive Tasks column (quick-add/toggle/delete via tasks API),
+  Focus + Agent-suggestion cards from the brief sections. Loading skeletons / empty / error states.
+- `/calendar`: Month/Week/Day toggle (Week default), events + task-deadline chips, prev/next/today nav,
+  **user-initiated** create modal (calls create with user_initiated, shows not-connected gracefully). 3 states.
+- `/finance`: added `FinancePortfolio` net-worth strip (brokerage + wallet KpiCards + positions/assets, each with
+  a "Connect X" empty state) above the existing brief/watchlist.
+- Navbar: added Daily + Calendar (spec §1 order); Polymarket kept.
+- **Verified:** `tsc --noEmit` clean; `npm run build` clean — `/daily` + `/calendar` now in the route list.

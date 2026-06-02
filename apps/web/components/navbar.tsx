@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { motion } from "framer-motion";
-import { LayoutGrid, Network, BarChart3, FileText, ListTodo, TrendingUp, LineChart } from "lucide-react";
+import { LayoutGrid, Network, BarChart3, FileText, ListTodo, TrendingUp, LineChart, Sun, CalendarDays } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const links = [
@@ -13,6 +13,8 @@ const links = [
   { href: "/jobs", label: "Jobs", icon: ListTodo },
   { href: "/artifacts", label: "Files", icon: FileText },
   { href: "/finance", label: "Finance", icon: LineChart },
+  { href: "/daily", label: "Daily", icon: Sun },
+  { href: "/calendar", label: "Calendar", icon: CalendarDays },
   { href: "/polymarket", label: "Polymarket", icon: TrendingUp },
 ];
 

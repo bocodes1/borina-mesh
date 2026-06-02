@@ -83,7 +83,124 @@ export const api = {
       `/finance/deepdive/${ticker}/cache`,
       { method: "DELETE" },
     ),
+
+  // ── Finance Life-OS (portfolio / quotes) ────────────────────────────────
+  getPortfolio: () => fetchJSON<PortfolioResponse>("/finance/portfolio"),
+  getQuote: (symbol: string) =>
+    fetchJSON<IntegrationEnvelope<QuoteData>>(`/finance/quote/${symbol}`),
+  getQuoteHistory: (symbol: string, range = "1M") =>
+    fetchJSON<IntegrationEnvelope<{ symbol: string; range: string; points: Array<{ t: number; close: number }> }>>(
+      `/finance/history/${symbol}?range=${range}`,
+    ),
+  getSymbolNews: (symbol: string) =>
+    fetchJSON<IntegrationEnvelope<Array<{ title: string; url: string; source: string }>>>(
+      `/finance/news/${symbol}`,
+    ),
+
+  // ── Daily tab ───────────────────────────────────────────────────────────
+  getDailySummary: () => fetchJSON<DailySummary>("/daily/summary"),
+  getDailyBrief: () => fetchJSON<DailyBriefResponse>("/daily/brief"),
+  generateDailyBrief: (useAgent = false) =>
+    fetchJSON<{ written: string; date: string; sections_found: string[] }>(
+      `/daily/generate?use_agent=${useAgent}`,
+      { method: "POST" },
+    ),
+
+  // ── Tasks ───────────────────────────────────────────────────────────────
+  listTasks: () => fetchJSON<TaskItem[]>("/tasks"),
+  createTask: (body: { title: string; due?: string | null; priority?: string; tag?: string }) =>
+    fetchJSON<TaskItem>("/tasks", { method: "POST", body: JSON.stringify(body) }),
+  updateTask: (id: number, body: Partial<TaskItem>) =>
+    fetchJSON<TaskItem>(`/tasks/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
+  deleteTask: (id: number) =>
+    fetch(`${API_BASE}/tasks/${id}`, { method: "DELETE" }).then((r) => r.ok),
+
+  // ── Calendar ────────────────────────────────────────────────────────────
+  getCalendarEvents: (from: string, to: string) =>
+    fetchJSON<CalendarResponse>(`/calendar/events?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`),
+  createCalendarEvent: (body: { summary: string; start: string; end: string; location?: string }) =>
+    fetchJSON<IntegrationEnvelope<{ id: string; htmlLink: string }>>("/calendar/events", {
+      method: "POST",
+      body: JSON.stringify({ ...body, user_initiated: true }),
+    }),
 };
+
+// ── Life-OS response types ──────────────────────────────────────────────────
+export interface IntegrationEnvelope<T = unknown> {
+  source: string;
+  connected: boolean;
+  data: T | null;
+  error: string | null;
+}
+
+export interface QuoteData {
+  symbol: string;
+  price: number | null;
+  change: number | null;
+  change_pct: number | null;
+  high?: number | null;
+  low?: number | null;
+  prev_close?: number | null;
+}
+
+export interface PortfolioResponse {
+  net_worth: number | null;
+  brokerage: IntegrationEnvelope<{
+    total_value: number | null;
+    day_change: number | null;
+    day_change_pct: number | null;
+    positions: Array<{ symbol: string; qty: number; value: number; day_change_pct: number | null }>;
+    allocation: Array<{ label: string; value: number }>;
+  }>;
+  wallet: IntegrationEnvelope<{
+    assets: Array<{ symbol: string; balance: number; value_usd: number; change_24h: number | null }>;
+    total_usd: number;
+  }>;
+}
+
+export interface TaskItem {
+  id: number;
+  title: string;
+  due: string | null;
+  priority: string;
+  tag: string;
+  done: boolean;
+  sort_order: number;
+  created_at: string;
+}
+
+export interface DailySummary {
+  date: string;
+  has_brief: boolean;
+  brief: Record<string, string | null>;
+  weather: IntegrationEnvelope<{ temp: number; conditions: string; description: string; location?: string }>;
+  open_tasks: TaskItem[];
+}
+
+export interface DailyBriefResponse {
+  date: string;
+  exists: boolean;
+  raw: string | null;
+  sections: Record<string, string>;
+}
+
+export interface CalendarEvent {
+  id: string;
+  title: string;
+  start: string | null;
+  end: string | null;
+  location?: string | null;
+  join_link?: string | null;
+  all_day?: boolean;
+  kind?: string;
+  tag?: string;
+}
+
+export interface CalendarResponse {
+  calendar: IntegrationEnvelope<unknown>;
+  events: CalendarEvent[];
+  task_chips: CalendarEvent[];
+}
 
 export interface DeepDiveSection {
   anchor: string;

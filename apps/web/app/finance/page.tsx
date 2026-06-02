@@ -6,6 +6,7 @@ import { FinanceBrief } from "@/components/finance-brief";
 import { FinanceWatchlist } from "@/components/finance-watchlist";
 import { FinanceCalendar } from "@/components/finance-calendar";
 import { FinanceSettings } from "@/components/finance-settings";
+import { FinancePortfolio } from "@/components/finance-portfolio";
 
 export default function FinancePage() {
   return (
@@ -23,6 +24,10 @@ export default function FinancePage() {
           multiples — never recommendations.
         </p>
       </motion.div>
+
+      <div className="mb-6">
+        <FinancePortfolio />
+      </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 space-y-6">
