@@ -43,3 +43,10 @@ build and to be **restored at the end**. Tests/dev servers use non-live ports (p
   `error-state` (retry), `loading-skeleton` (Skeleton + KpiStrip/Card/Rows presets).
 - Fixed a type conflict (`title: ReactNode` vs HTML `title`) via `Omit<…,"title">`.
 - **Tests now pass:** `vitest run test/primitives.test.tsx` → 6 passed; `tsc --noEmit` clean; `npm run build` clean.
+
+## 2026-06-02 — Step 3: Delete Terminal tab (Task #3) ✅
+- Removed `app/terminal/` route and the navbar import + link. Left the lucide `Terminal` *icon*
+  reuse in `overnight-workers.tsx` (unrelated to the deleted tab).
+- Regression guard `test/navbar-terminal.test.tsx`: navbar has no Terminal item / no `/terminal`
+  link, core tabs still present. (404 behavior validated by route deletion + covered in §10b mobile/route pass.)
+- **Tests pass:** vitest guard green; `npm run build` clean (route list no longer includes `/terminal`).

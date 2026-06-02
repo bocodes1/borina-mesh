@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { motion } from "framer-motion";
-import { LayoutGrid, Network, BarChart3, FileText, ListTodo, TrendingUp, Terminal, LineChart } from "lucide-react";
+import { LayoutGrid, Network, BarChart3, FileText, ListTodo, TrendingUp, LineChart } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const links = [
@@ -14,7 +14,6 @@ const links = [
   { href: "/artifacts", label: "Files", icon: FileText },
   { href: "/finance", label: "Finance", icon: LineChart },
   { href: "/polymarket", label: "Polymarket", icon: TrendingUp },
-  { href: "/terminal", label: "Terminal", icon: Terminal },
 ];
 
 export function Navbar() {
