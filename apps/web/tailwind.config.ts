@@ -49,6 +49,14 @@ const config: Config = {
           DEFAULT: "hsl(var(--card))",
           foreground: "hsl(var(--card-foreground))",
         },
+        surface: {
+          DEFAULT: "hsl(var(--surface))",
+          2: "hsl(var(--surface-2))",
+        },
+        brand: "hsl(var(--brand))",
+        positive: "hsl(var(--positive))",
+        negative: "hsl(var(--negative))",
+        warn: "hsl(var(--warn))",
       },
       borderRadius: {
         lg: "var(--radius)",

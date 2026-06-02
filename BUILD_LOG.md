@@ -32,3 +32,14 @@ build and to be **restored at the end**. Tests/dev servers use non-live ports (p
   and `npm test` / `test:watch` scripts. There was **no** frontend test harness before.
 - **Tests now pass:** backend `pytest -q` → **92 passed** (was 91 + 1 pre-existing fail). Frontend
   `vitest run` → sanity test green.
+
+## 2026-06-02 — Step 2: Design system + shared primitives (Task #2) ✅
+- Extended token system additively (kept violet `--primary` as the single accent): added
+  `--surface`/`--surface-2` layers + `--brand`/`--positive`/`--negative`/`--warn` semantics in
+  `globals.css` (both `:root` and `.dark`), wired matching Tailwind colors (`bg-surface`, `text-positive`…).
+  Added `.surface-card` (hairline + inner top-light gradient + shadow) and `.value-flash` (live-update tint).
+- Created the 6 shared primitives in `components/ui/`: `section-header`, `kpi-card` (tabular-nums + delta tones),
+  `data-table` (generic, numeric cols → tabular-nums, empty→EmptyState), `empty-state` (CTA slot for "Connect X"),
+  `error-state` (retry), `loading-skeleton` (Skeleton + KpiStrip/Card/Rows presets).
+- Fixed a type conflict (`title: ReactNode` vs HTML `title`) via `Omit<…,"title">`.
+- **Tests now pass:** `vitest run test/primitives.test.tsx` → 6 passed; `tsc --noEmit` clean; `npm run build` clean.

@@ -24,6 +24,14 @@
     --input: 240 5.9% 90%;
     --ring: 263 70% 50%;
     --radius: 0.75rem;
+
+    /* Command-center surface layers + semantic colors (single source of truth) */
+    --surface: 0 0% 100%;
+    --surface-2: 240 4.8% 95.9%;
+    --brand: 263 70% 50%;
+    --positive: 142 71% 38%;
+    --negative: 0 72% 45%;
+    --warn: 38 92% 42%;
   }
 
   .dark {
@@ -46,6 +54,14 @@
     --border: 240 3.7% 15.9%;
     --input: 240 3.7% 15.9%;
     --ring: 263 85% 65%;
+
+    /* Dark command-center layers: bg(near-black) < surface < surface-2 */
+    --surface: 240 9% 7%;
+    --surface-2: 240 8% 11%;
+    --brand: 263 85% 66%;
+    --positive: 142 69% 45%;
+    --negative: 0 72% 56%;
+    --warn: 38 95% 56%;
   }
 }
 
@@ -72,4 +88,25 @@
   background: hsl(var(--card) / 0.5);
   backdrop-filter: blur(12px);
   border: 1px solid hsl(var(--border) / 0.5);
+}
+
+/* Raised surface card: hairline border + subtle top-light inner gradient.
+   The shared `kpi-card`/cards use this so no card looks bare. */
+.surface-card {
+  background:
+    linear-gradient(180deg, hsl(var(--foreground) / 0.03) 0%, transparent 40%),
+    hsl(var(--surface));
+  border: 1px solid hsl(var(--border) / 0.6);
+  box-shadow: 0 1px 0 0 hsl(var(--foreground) / 0.04) inset,
+    0 1px 2px 0 hsl(0 0% 0% / 0.25);
+}
+
+/* Live-data value flash: brief accent tint when a number updates. */
+@keyframes value-flash {
+  0% { background-color: hsl(var(--brand) / 0.22); }
+  100% { background-color: transparent; }
+}
+.value-flash {
+  animation: value-flash 0.6s ease-out;
+  border-radius: 0.25rem;
 }
