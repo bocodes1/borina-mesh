@@ -204,3 +204,14 @@ but no concurrency cap / persisted queue / idempotency / crash-safety).
   glyph + mono label) and `kpi-card` (mono value) to the console look.
 - **Tests:** `test/live-primitives.test.tsx` (11) incl. count-up convergence. Full frontend suite **46 passed**;
   `tsc` + `next build` clean.
+
+## Step 3: Live command-center front page (Task #13) ✅
+- `lib/use-activity.ts`: one shared SSE subscription → recent events + per-agent rolling activity histogram
+  (real events-per-tick) driving the fleet sparklines (no placeholder data).
+- `CommandStatusBar`: live clock + uptime (tick at rest), running/queued/runs-today (stats), success-rate +
+  avg-latency derived from real `/jobs` data, tokens/cost from analytics — all via `LiveValue` (flash/count-up).
+- `LiveActivityStream`: real-time SSE feed, rows animate in (AnimatePresence), blinking cursor header.
+- `AgentFleet`: live status dots, running cards get `.live-glow` + accent border + streaming current_task with
+  cursor (obviously distinct from idle), per-agent sparkline, Run/Open-chat (streaming chat preserved). Rebuilt
+  `/` from card-grid → live ops dashboard.
+- **Tests:** `test/command-center.test.tsx` (4) incl. "running visibly distinct from idle". Full suite **50 passed**.
