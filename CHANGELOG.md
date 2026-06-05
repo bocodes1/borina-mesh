@@ -4,6 +4,43 @@ All notable changes to Borina Mesh are documented here.
 Format based on [Keep a Changelog](https://keepachangelog.com/); this project
 uses date-based releases.
 
+## [2026-06-05] — Phase 2 Delta: Mission-Control UI, Live Graph, Background Dispatch
+
+A delta on the same-day rebuild — making the console feel **alive**.
+
+### Added
+- **Mission-control design language:** near-black base with a single phosphor-green
+  accent reserved for live signal, monospace data, console texture (hairline grid,
+  scanline). New live primitives: `live-value` (flash + count-up), `status-dot`
+  (run-pulse / idle-breathe), `sparkline`, `terminal-cursor`, `activity-feed-row`.
+- **Live command-center front page:** a status bar with live clock/uptime/stats and
+  derived KPIs (success rate, avg latency), a real-time activity stream, and a reactive
+  agent fleet where running agents glow + stream their current task (visibly distinct
+  from idle).
+- **Live `/network` graph:** a custom force-directed simulation (replacing the static
+  React Flow graph) — nodes drift and settle, edges fire particles on real agent message
+  flow, drag + node panel + live stats. Responsive bottom-nav app shell on mobile.
+- **Background Telegram dispatch:** the webhook now enqueues onto a persisted, crash-safe
+  queue and returns instantly — concurrent (capped), idempotent by Telegram `update_id`,
+  with orphaned-job recovery on restart and a single "still working" progress ping.
+- **Live Jobs run-log** (rows animate queued→running→done, row→drawer) and a
+  **mission-control Artifacts grid** where Telegram-sourced PDFs surface their original prompt.
+
+### Changed
+- Every tab inherits the mission-control look; the 6 shared primitives were upgraded so
+  all consumers updated at once.
+- All outbound Telegram messages route through one formatter: short digest, no emojis,
+  MarkdownV2-escaped, whitespace-normalized, length-capped (detail stays in the PDF).
+
+### Security
+- The background/formatting changes preserve the fail-closed webhook (secret-token +
+  allow-list) and the read-only-only dispatch rule. Forbidden intents are still refused.
+
+### Notes
+- Verified green: backend `pytest` 162, frontend `vitest` 55, `tsc` + `next build` clean.
+- Tier-2 (needs real keys + a device): unchanged from the prior release's checklist; send one
+  real Telegram message to confirm the async, short, well-formatted reply + PDF in `/artifacts`.
+
 ## [2026-06-05] — Frontend Rebuild + Life-OS Tabs + Autonomous Telegram Dispatch
 
 A large release adding three personal "life-OS" tabs, a real integrations
