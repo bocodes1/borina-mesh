@@ -38,3 +38,24 @@ def test_get_artifact_path_traversal_blocked(tmp_path, monkeypatch):
     monkeypatch.setenv("REPORTS_DIR", str(tmp_path))
     with pytest.raises(ValueError, match="invalid path"):
         get_artifact_path("../../etc", "passwd")
+
+
+def test_list_artifacts_surfaces_telegram_meta(tmp_path, monkeypatch):
+    import json
+    monkeypatch.setenv("REPORTS_DIR", str(tmp_path))
+    day = tmp_path / "2026-06-05"
+    day.mkdir()
+    (day / "researcher-1.pdf").write_bytes(b"%PDF")
+    meta_dir = day / ".telegram-meta"
+    meta_dir.mkdir()
+    (meta_dir / "researcher-1.pdf.json").write_text(
+        json.dumps({"source": "telegram", "agent": "researcher", "prompt": "verify my stocks"})
+    )
+
+    result = list_artifacts()
+    art = next(a for a in result if a.name == "researcher-1.pdf")
+    assert art.source == "telegram"
+    assert art.agent == "researcher"
+    assert art.prompt == "verify my stocks"
+    # the meta sidecar dir is not itself listed as an artifact
+    assert all(a.name != "researcher-1.pdf.json" for a in result)

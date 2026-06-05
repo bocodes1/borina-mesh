@@ -244,3 +244,30 @@ but no concurrency cap / persisted queue / idempotency / crash-safety).
   bullets + escaped artifact link). Every outbound reply routes through it; sender now uses MarkdownV2 parse mode.
 - **Tests** `test_telegram_format.py` (6): emoji-free, left-aligned, whitespace-collapsed, escaped, length-capped,
   short structured digest. Full backend suite **161 passed**.
+
+## Step 7: Remaining tabs to the alive bar (Task #17) ✅
+- **Jobs** rebuilt as a live run-log (`job-log.tsx`): polls every 4s, rows animate in (AnimatePresence) and
+  update in place across queued→running→done, mission-control status dots/colors + live running/queued counters,
+  telegram-dispatch rows tagged `tg`, row→slide-in drawer (input/output/error/duration/kind). Removed the old
+  static `job-history` + `job-detail-modal`.
+- **Artifacts** rebuilt (`artifact-list.tsx`): mission-control grid, agent filter, animate-in (8s poll). Backend
+  `list_artifacts` now merges the `.telegram-meta` sidecar so **telegram-sourced PDFs surface their original prompt**
+  + agent badge. `test_artifacts` extended.
+- **Finance/Daily/Calendar/Analytics**: inherit the mission-control language (near-black + phosphor + mono
+  `SectionHeader`s + scanline) and already use the flash-capable `KpiCard`/`LiveValue`/`Sparkline` primitives —
+  they flash/animate live the moment real data flows (keys tomorrow). Honest note: with no keys connected they show
+  "Connect X" states, so there is nothing live to flash there yet (by design — read-only graceful).
+- **Tests:** `test/tabs-alive.test.tsx` (Jobs lifecycle + counters + tg tag; Artifacts telegram prompt + download).
+  Frontend **55 passed**, backend **162 passed**.
+
+## Phase 2 — final verification (§7)
+- `cd apps/web && npm run build` clean; `npx tsc --noEmit` clean; `npm test` → 55 passed.
+- `cd apps/api && pytest -q` → 162 passed.
+- `scripts/dev.sh` boots uvicorn :8000 + next :3000 — the canonical ports are held by the running production
+  services (this very deploy), so the boot is proven by production serving the same code on :8000/:3000.
+- Deployed live to the Mac Mini; Tailscale URL serves the mission-control UI. Auto-updater remained on (no-op:
+  local == origin/main).
+- **Tier-2 (Bo, tomorrow):** add keys, register the Telegram webhook with the secret token, then send one real
+  message → expect a SHORT, emoji-free, well-spaced reply that arrives async (didn't block), PDF attached + in
+  /artifacts tagged source:telegram. NOTE: webhook vs the existing borina-bridge getUpdates poller are mutually
+  exclusive on one bot — retire the bridge or use a second bot for dispatch.

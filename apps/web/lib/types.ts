@@ -16,7 +16,7 @@ export interface Job {
   id: number;
   agent_id: string;
   prompt: string;
-  status: "pending" | "running" | "completed" | "failed" | "cancelled";
+  status: "pending" | "queued" | "running" | "completed" | "failed" | "cancelled";
   created_at: string;
   started_at: string | null;
   completed_at: string | null;
@@ -87,6 +87,9 @@ export interface Artifact {
   size_bytes: number;
   modified: string;
   path: string;
+  source?: string | null;
+  agent?: string | null;
+  prompt?: string | null;
 }
 
 export interface AgentRun {

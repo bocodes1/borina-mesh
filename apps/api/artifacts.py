@@ -18,6 +18,21 @@ class ArtifactInfo:
     size_bytes: int
     modified: str
     path: str
+    source: str | None = None    # e.g. "telegram"
+    agent: str | None = None
+    prompt: str | None = None    # original request for telegram-sourced artifacts
+
+
+def _read_meta(day_dir: Path, name: str) -> dict | None:
+    """Telegram dispatch writes a sidecar at {day}/.telegram-meta/{name}.json."""
+    meta = day_dir / ".telegram-meta" / f"{name}.json"
+    if not meta.exists():
+        return None
+    try:
+        import json
+        return json.loads(meta.read_text())
+    except Exception:
+        return None
 
 
 def _reports_roots() -> list[Path]:
@@ -50,12 +65,16 @@ def list_artifacts() -> list[ArtifactInfo]:
                 if not file.is_file():
                     continue
                 stat = file.stat()
+                meta = _read_meta(day_dir, file.name) or {}
                 info = ArtifactInfo(
                     date=day_dir.name,
                     name=file.name,
                     size_bytes=stat.st_size,
                     modified=datetime.fromtimestamp(stat.st_mtime).isoformat(),
                     path=f"{day_dir.name}/{file.name}",
+                    source=meta.get("source"),
+                    agent=meta.get("agent"),
+                    prompt=meta.get("prompt"),
                 )
                 key = (info.date, info.name)
                 existing = merged.get(key)
