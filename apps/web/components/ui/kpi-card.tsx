@@ -41,15 +41,15 @@ export function KpiCard({
       {...props}
     >
       <div className="flex items-center justify-between">
-        <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+        <span className="font-mono text-[11px] font-medium uppercase tracking-[0.1em] text-muted-foreground">
           {label}
         </span>
-        {icon ? <span className="text-muted-foreground/80">{icon}</span> : null}
+        {icon ? <span className="text-brand/70">{icon}</span> : null}
       </div>
       <div className="flex items-baseline gap-2">
         <span
           className={cn(
-            "text-2xl font-semibold tabular-nums tracking-tight text-foreground",
+            "font-mono text-2xl font-semibold tabular-nums tracking-tight text-foreground",
             flash && "value-flash"
           )}
         >

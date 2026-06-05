@@ -54,9 +54,13 @@ const config: Config = {
           2: "hsl(var(--surface-2))",
         },
         brand: "hsl(var(--brand))",
+        "brand-2": "hsl(var(--brand-2))",
         positive: "hsl(var(--positive))",
         negative: "hsl(var(--negative))",
         warn: "hsl(var(--warn))",
+      },
+      fontFamily: {
+        mono: ["var(--font-geist-mono)", "ui-monospace", "SFMono-Regular", "monospace"],
       },
       borderRadius: {
         lg: "var(--radius)",

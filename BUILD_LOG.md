@@ -185,3 +185,22 @@ The auto-updater (`com.borina.mesh-updater`) was paused for the build and has be
 ### Optional design polish (not blocking)
 - Deeper visual rebuild of Mesh/Network/Jobs/Artifacts onto the shared primitives (Analytics already done).
 - Live LLM-orchestrated daily brief (currently deterministic fallback when no agent/keys).
+
+---
+
+# PHASE 2 DELTA — 2026-06-05
+
+Delta on the shipped release (5 items). Read CHANGELOG + this log first; not rebuilding shipped work.
+State at start: items 1,2,4,5 absent; item 3 (background dispatch) partial (webhook returns 200 + BackgroundTasks,
+but no concurrency cap / persisted queue / idempotency / crash-safety).
+
+## Step 2: Mission-control design language + live primitives (Task #12) ✅
+- Retheme (`globals.css` + tailwind): near-black `#0a0b0d` base (220 13% 4%), greyscale surfaces, ONE phosphor
+  accent `#3ddc84` mapped onto `--primary`/`--brand`/`--ring` so every shipped primitive inherits; amber `--brand-2`
+  secondary. Console texture: hairline grid-bg, faint scanline overlay, `.live-glow`, `.value-flash`, `.term-cursor`,
+  `.dot-breathe`/`.dot-run`. `font-mono` → Geist Mono.
+- New live primitives: `live-value` (flash-on-change + count-up), `status-dot` (phosphor run-pulse / idle-breathe;
+  old path re-exports), `sparkline`, `terminal-cursor`, `activity-feed-row`. Updated `section-header` (`>` prompt
+  glyph + mono label) and `kpi-card` (mono value) to the console look.
+- **Tests:** `test/live-primitives.test.tsx` (11) incl. count-up convergence. Full frontend suite **46 passed**;
+  `tsc` + `next build` clean.

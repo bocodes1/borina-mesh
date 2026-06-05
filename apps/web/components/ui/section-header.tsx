@@ -27,12 +27,13 @@ export function SectionHeader({
       {...props}
     >
       <div className="min-w-0">
-        <h2 className="flex items-center gap-2 text-lg font-semibold tracking-tight text-foreground">
+        <h2 className="flex items-center gap-2 font-mono text-sm font-semibold uppercase tracking-[0.12em] text-foreground/90">
+          <span className="select-none font-bold text-brand">&gt;</span>
           {icon ? <span className="text-muted-foreground">{icon}</span> : null}
           <span className="truncate">{title}</span>
         </h2>
         {description ? (
-          <p className="mt-0.5 text-sm text-muted-foreground">{description}</p>
+          <p className="mt-1 font-mono text-xs text-muted-foreground">{description}</p>
         ) : null}
       </div>
       {actions ? <div className="flex items-center gap-2 shrink-0">{actions}</div> : null}
