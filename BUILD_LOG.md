@@ -215,3 +215,14 @@ but no concurrency cap / persisted queue / idempotency / crash-safety).
   cursor (obviously distinct from idle), per-agent sparkline, Run/Open-chat (streaming chat preserved). Rebuilt
   `/` from card-grid → live ops dashboard.
 - **Tests:** `test/command-center.test.tsx` (4) incl. "running visibly distinct from idle". Full suite **50 passed**.
+
+## Step 4: Rebuild /network as live force graph (Task #14) ✅
+- Replaced static React Flow with a custom SVG force graph (route 58kB → 4.7kB). `lib/force-sim.ts`:
+  deterministic force-directed sim (repulsion + edge springs + centering) — testable, no Math.random.
+- Mission-control look: hairline grid canvas, MESH hub (amber) + agent nodes (phosphor when running, grey idle,
+  red error), mono labels, running-node pulse ring, drag-to-reposition, click→side panel (tagline + quick-run),
+  legend + live stats overlay (active links, msg/min, node count).
+- **Alive (dead-graph fix):** nodes positioned by the live sim (settle/drift); edges animate on REAL activity SSE —
+  particle travels hub→agent, edge glows+thickens for ~2.2s on each message.
+- **Regression test** `test/network-graph.test.tsx` (3): positions change across ticks, settled ≠ initial coords,
+  edge marks active on a mock message event. Full suite **53 passed**.
