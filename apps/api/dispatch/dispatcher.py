@@ -52,7 +52,12 @@ def send_telegram_message(chat_id: int, text: str) -> None:
         return
     http_post_json(
         f"https://api.telegram.org/bot{token}/sendMessage",
-        json={"chat_id": chat_id, "text": text},
+        json={
+            "chat_id": chat_id,
+            "text": text,
+            "parse_mode": "MarkdownV2",
+            "disable_web_page_preview": True,
+        },
     )
 
 
@@ -101,11 +106,16 @@ async def dispatch_intent(intent: Intent, chat_id: int, requested_at: Optional[s
         raise ValueError("intent is not dispatchable (forbidden/clarify/no agent)")
 
     requested_at = requested_at or datetime.utcnow().isoformat()
-    day = today_str()
-
     # Persist a job row so the run shows up in /jobs.
     job_id = _create_job(intent)
+    return await _produce_and_reply(intent, chat_id, job_id, requested_at)
 
+
+async def _produce_and_reply(intent: Intent, chat_id: int, job_id: int, requested_at: str) -> dict:
+    """Run agent → PDF → artifact → Telegram reply for an already-created job
+    row. Used by the direct path AND the background worker (which pre-creates
+    the queued job, then marks it running before calling this)."""
+    day = today_str()
     prompt = _build_prompt(intent)
     markdown = await run_agent(intent.agent, prompt)
     if not markdown.strip():
@@ -126,16 +136,21 @@ async def dispatch_intent(intent: Intent, chat_id: int, requested_at: Optional[s
     write_artifact_meta(day, name, meta)
     _complete_job(job_id, markdown)
 
-    summary = _summarize(markdown)
     deep_link = f"http://{_public_host()}/artifacts?id={day}/{name}"
-    send_telegram_message(chat_id, f"{summary}\n\n{deep_link}")
+    # Outbound reply goes through the formatter so it's short, emoji-free, clean.
+    from dispatch.telegram_format import format_dispatch_reply
+
+    text = format_dispatch_reply(
+        agent=intent.agent, markdown=markdown, deep_link=deep_link
+    )
+    send_telegram_message(chat_id, text)
     send_telegram_document(chat_id, pdf_path, caption=f"{intent.agent} report")
 
     return {
         "job_id": job_id,
         "artifact": {"date": day, "name": name, "path": f"{day}/{name}", "meta": meta},
         "deep_link": deep_link,
-        "summary": summary,
+        "summary": _summarize(markdown),
     }
 
 

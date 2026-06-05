@@ -8,6 +8,7 @@ from sqlmodel import SQLModel, Field
 
 class JobStatus(str, Enum):
     PENDING = "pending"
+    QUEUED = "queued"
     RUNNING = "running"
     COMPLETED = "completed"
     FAILED = "failed"
@@ -32,6 +33,9 @@ class Job(SQLModel, table=True):
     log_path: Optional[str] = None
     qa_verdict: Optional[str] = None
     qa_notes: Optional[str] = None
+    # Telegram background dispatch: idempotency key + reply target.
+    telegram_update_id: Optional[int] = Field(default=None, index=True)
+    telegram_chat_id: Optional[int] = None
 
 
 class AgentRun(SQLModel, table=True):

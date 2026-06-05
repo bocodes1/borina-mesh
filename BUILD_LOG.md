@@ -226,3 +226,21 @@ but no concurrency cap / persisted queue / idempotency / crash-safety).
   particle travels hub→agent, edge glows+thickens for ~2.2s on each message.
 - **Regression test** `test/network-graph.test.tsx` (3): positions change across ticks, settled ≠ initial coords,
   edge marks active on a mock message event. Full suite **53 passed**.
+
+## Step 5: Subconscious background dispatch (Task #15) ✅
+- Persisted queue on the Job table: `JobStatus.QUEUED` + `telegram_update_id`/`telegram_chat_id` (migrated).
+- `dispatch/worker.py`: `enqueue_job` (idempotent by update_id), `claim_next` (atomic, concurrency-capped by
+  TELEGRAM_MAX_CONCURRENT_JOBS), `run_job` (re-resolves intent, runs, single progress-ping past
+  TELEGRAM_PROGRESS_PING_SECONDS, short error on failure), `recover_orphans` (re-queues crashed `running` jobs),
+  `DispatchWorker` drain loop started in lifespan.
+- Webhook now ENQUEUES + returns 200 fast (never awaits the run); refactored `dispatcher._produce_and_reply`
+  shared by direct + worker paths. Security boundary unchanged (secret/allow-list/forbidden all preserved).
+- **Tests** `test_background_jobs.py` (6): 200-without-await, queued→running→done, concurrency cap, crash-survival
+  (orphan recovery), idempotent duplicate update_id.
+
+## Step 6: Telegram reply formatter (Task #16) ✅
+- `dispatch/telegram_format.py`: `strip_emojis`, `normalize_whitespace` (dedent/trim/collapse), `escape_markdown_v2`,
+  length-cap with PDF pointer; `format_telegram` (acks/errors) + `format_dispatch_reply` (short headline + ≤4
+  bullets + escaped artifact link). Every outbound reply routes through it; sender now uses MarkdownV2 parse mode.
+- **Tests** `test_telegram_format.py` (6): emoji-free, left-aligned, whitespace-collapsed, escaped, length-capped,
+  short structured digest. Full backend suite **161 passed**.

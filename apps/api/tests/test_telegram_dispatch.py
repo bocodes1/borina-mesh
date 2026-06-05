@@ -1,8 +1,11 @@
 """Telegram webhook security boundary (spec §8b.2 / §8b.7 / §10b).
 
 The security-critical suite: allow-list, fail-closed, secret-token, forbidden
-refusal, and that a valid update enqueues the right agent fast.
+refusal, and that a valid update enqueues the right agent fast (never awaiting
+the run). The enqueue mechanism is now the persisted background queue.
 """
+from types import SimpleNamespace
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -19,19 +22,24 @@ HEADERS = {"X-Telegram-Bot-Api-Secret-Token": SECRET}
 
 @pytest.fixture(autouse=True)
 def _no_real_sends(monkeypatch):
-    # Never hit the Telegram API in tests.
     monkeypatch.setattr(dispatcher, "send_telegram_message", lambda *a, **k: None)
     monkeypatch.setenv("TELEGRAM_WEBHOOK_SECRET", SECRET)
 
 
 def _spy_enqueue(monkeypatch):
+    """Spy on enqueue_job; record (agent, chat_id, update_id), return a fake job."""
     calls = []
-    monkeypatch.setattr(tg, "enqueue_dispatch", lambda bg, intent, chat_id, ts: calls.append((intent, chat_id)))
+
+    def fake(text, agent, update_id, chat_id):
+        calls.append({"agent": agent, "chat_id": chat_id, "update_id": update_id, "text": text})
+        return SimpleNamespace(id=len(calls))
+
+    monkeypatch.setattr(tg, "enqueue_job", fake)
     return calls
 
 
-def _update(chat_id, text):
-    return {"message": {"chat": {"id": chat_id}, "text": text}}
+def _update(chat_id, text, update_id=1):
+    return {"update_id": update_id, "message": {"chat": {"id": chat_id}, "text": text}}
 
 
 def test_missing_secret_rejected(monkeypatch):
@@ -56,7 +64,7 @@ def test_non_allowlisted_chat_silently_ignored(monkeypatch):
     calls = _spy_enqueue(monkeypatch)
     r = client.post("/api/telegram/webhook", json=_update(999999, "research AI"), headers=HEADERS)
     assert r.status_code == 200 and r.json()["status"] == "ignored"
-    assert calls == []  # no dispatch
+    assert calls == []
 
 
 def test_empty_allowlist_fails_closed(monkeypatch):
@@ -64,7 +72,7 @@ def test_empty_allowlist_fails_closed(monkeypatch):
     calls = _spy_enqueue(monkeypatch)
     r = client.post("/api/telegram/webhook", json=_update(BO, "research AI"), headers=HEADERS)
     assert r.status_code == 200 and r.json()["status"] == "ignored"
-    assert calls == []  # nobody is allowed
+    assert calls == []
 
 
 def test_valid_update_enqueues_right_agent(monkeypatch):
@@ -79,8 +87,7 @@ def test_valid_update_enqueues_right_agent(monkeypatch):
     body = r.json()
     assert body["status"] == "dispatched" and body["agent"] == "researcher"
     assert len(calls) == 1
-    intent, chat_id = calls[0]
-    assert intent.agent == "researcher" and chat_id == BO
+    assert calls[0]["agent"] == "researcher" and calls[0]["chat_id"] == BO
 
 
 def test_forbidden_action_refused_no_dispatch(monkeypatch):
@@ -88,4 +95,4 @@ def test_forbidden_action_refused_no_dispatch(monkeypatch):
     calls = _spy_enqueue(monkeypatch)
     r = client.post("/api/telegram/webhook", json=_update(BO, "sell all my NVDA shares"), headers=HEADERS)
     assert r.status_code == 200 and r.json()["status"] == "refused"
-    assert calls == []  # nothing dispatched
+    assert calls == []

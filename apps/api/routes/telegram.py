@@ -1,4 +1,4 @@
-"""Telegram webhook (spec §8b.2) — the security boundary for auto-dispatch.
+"""Telegram webhook (spec §8b.2 + §3) — the security boundary for auto-dispatch.
 
 Order of checks (all must pass):
 1. **secret-token header** (`X-Telegram-Bot-Api-Secret-Token` == TELEGRAM_WEBHOOK_SECRET)
@@ -8,15 +8,18 @@ Order of checks (all must pass):
 3. **intent** — forbidden actions are refused (no dispatch); low-confidence asks to
    rephrase. Only a dispatchable research/intel intent is acked + enqueued.
 
-Returns 200 fast so Telegram doesn't retry; the agent runs in the background.
+The webhook ENQUEUES a persisted job and returns 200 fast — it NEVER awaits the
+agent run. The background worker drains the queue (concurrent, crash-safe). The
+update_id keys idempotency so a retried Telegram update never double-runs.
 """
 import os
-from datetime import datetime
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request
 
 from dispatch import dispatcher
-from dispatch.intent import resolve_intent, Intent
+from dispatch.intent import resolve_intent
+from dispatch.worker import enqueue_job
+from dispatch.telegram_format import format_telegram
 
 router = APIRouter(prefix="/api/telegram", tags=["telegram"])
 
@@ -42,28 +45,14 @@ def _allowed_ids() -> set[int]:
     return ids
 
 
-def _run_dispatch(intent: Intent, chat_id: int, requested_at: str) -> None:
-    import asyncio
-
-    try:
-        asyncio.run(dispatcher.dispatch_intent(intent, chat_id, requested_at))
-    except Exception as exc:  # noqa: BLE001
-        print(f"[telegram] dispatch failed: {exc}")
-        dispatcher.send_telegram_message(chat_id, f"⚠️ Dispatch failed: {exc}")
-
-
-def enqueue_dispatch(background: BackgroundTasks, intent: Intent, chat_id: int, requested_at: str) -> None:
-    """Indirection so tests can spy on enqueue without running the agent."""
-    background.add_task(_run_dispatch, intent, chat_id, requested_at)
-
-
 @router.post("/webhook")
-async def webhook(request: Request, background: BackgroundTasks):
+async def webhook(request: Request):
     # 1. Secret-token header — hard reject (this is the security boundary).
     if not _check_secret(request.headers.get(SECRET_HEADER, "")):
         raise HTTPException(403, "invalid or missing secret token")
 
     update = await request.json()
+    update_id = update.get("update_id")
     msg = update.get("message") or update.get("edited_message") or {}
     chat = msg.get("chat", {}) or {}
     chat_id = chat.get("id")
@@ -79,18 +68,26 @@ async def webhook(request: Request, background: BackgroundTasks):
     if intent.forbidden:
         dispatcher.send_telegram_message(
             chat_id,
-            f"That maps to a {intent.forbidden_reason} action — not auto-dispatchable. "
-            f"I only run read-only research/intel from Telegram.",
+            format_telegram(
+                f"That maps to a {intent.forbidden_reason} action - not auto-dispatchable. "
+                f"I only run read-only research and intel from Telegram."
+            ),
         )
         return {"ok": True, "status": "refused", "reason": intent.forbidden_reason}
 
     if not intent.dispatchable:
         dispatcher.send_telegram_message(
-            chat_id, "I couldn't confidently route that — could you rephrase?"
+            chat_id, format_telegram("I could not confidently route that - could you rephrase?")
         )
         return {"ok": True, "status": "clarify"}
 
-    # Ack fast, dispatch in the background.
-    dispatcher.send_telegram_message(chat_id, f"On it — dispatching {intent.agent}…")
-    enqueue_dispatch(background, intent, chat_id, datetime.utcnow().isoformat())
-    return {"ok": True, "status": "dispatched", "agent": intent.agent}
+    # Enqueue (idempotent by update_id), ack, return fast. Never await the run.
+    job = enqueue_job(text, intent.agent, update_id, chat_id)
+    if job is None:
+        return {"ok": True, "status": "duplicate"}
+
+    dispatcher.send_telegram_message(
+        chat_id,
+        format_telegram(f"On it - dispatching {intent.agent}. I will send the report when it is ready."),
+    )
+    return {"ok": True, "status": "dispatched", "agent": intent.agent, "job_id": job.id}

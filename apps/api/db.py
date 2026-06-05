@@ -31,6 +31,8 @@ def init_db() -> None:
             ("job", "log_path", "TEXT"),
             ("job", "qa_verdict", "TEXT"),
             ("job", "qa_notes", "TEXT"),
+            ("job", "telegram_update_id", "INTEGER"),
+            ("job", "telegram_chat_id", "INTEGER"),
             ("agentrun", "qa_verdict", "TEXT"),
             ("agentrun", "qa_notes", "TEXT"),
         ]

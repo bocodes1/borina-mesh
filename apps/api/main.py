@@ -55,7 +55,19 @@ async def lifespan(app: FastAPI):
     scheduler_service.register_defaults()
     scheduler_service.register_finance_brief()
     scheduler_service.register_schedule_daily()
+    # Background Telegram dispatch worker (crash-safe queue drain).
+    try:
+        from dispatch.worker import worker as dispatch_worker
+        dispatch_worker.start()
+        print("[dispatch-worker] started")
+    except Exception as e:
+        print(f"[dispatch-worker] failed to start: {e}")
     yield
+    try:
+        from dispatch.worker import worker as dispatch_worker
+        dispatch_worker.stop()
+    except Exception:
+        pass
     scheduler_service.stop()
     print("Borina Mesh shutting down...")
 
