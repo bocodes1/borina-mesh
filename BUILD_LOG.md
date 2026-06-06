@@ -271,3 +271,22 @@ but no concurrency cap / persisted queue / idempotency / crash-safety).
   message → expect a SHORT, emoji-free, well-spaced reply that arrives async (didn't block), PDF attached + in
   /artifacts tagged source:telegram. NOTE: webhook vs the existing borina-bridge getUpdates poller are mutually
   exclusive on one bot — retire the bridge or use a second bot for dispatch.
+
+---
+
+# PHASE 3 DELTA — 2026-06-05
+
+Delta on the shipped build (3 items). State at start: §1 formatter cleans whitespace but does NOT cap
+lines (replies still multi-paragraph); §2 Files tab = the rebuilt Artifacts grid (agent filter + telegram
+meta) but no search / type+date filter / origin grouping / in-pane preview / clean endpoint; §3 planner
+agent absent.
+
+## Step 1: Terse Telegram replies by default (Task #18) ✅
+- `telegram_format.py`: hard line cap (`TELEGRAM_MAX_LINES=3`) via `cap_lines`; `format_telegram` now collapses
+  multi-paragraph input to the cap + PDF pointer. `format_dispatch_reply` is terse by default (headline +
+  optional one line + link, ≤3 lines, no paragraph breaks) and only expands on a concrete `is_big_task` signal
+  (>1800 chars OR ≥3 headings OR ≥8 bullets) into a sectioned digest that LEADS with a one-line TL;DR (still
+  ≤4096, emoji-free, escaped). Prompt backup added to `_build_prompt` (one-line summary first, no paragraphs in
+  chat, no emojis). `TELEGRAM_MAX_LINES` in `.env.example`.
+- **Tests** `test_telegram_format.py` (+4): terse simple reply (≤3 lines, no para breaks), multi-paragraph
+  collapses to cap+pointer, big-task expands with leading TL;DR. Full backend suite **165 passed**.

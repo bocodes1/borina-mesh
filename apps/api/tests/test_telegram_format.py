@@ -73,3 +73,34 @@ def test_dispatch_reply_truncates_when_huge():
     out = format_dispatch_reply(agent="ceo", markdown=huge, deep_link="http://h/a?id=x")
     assert len(out) <= MAX_LEN
     assert "full report" in out
+
+
+def test_simple_reply_is_terse():
+    out = format_dispatch_reply(
+        agent="researcher", markdown="AAPL looks fine, no thesis change.",
+        deep_link="http://h:3000/artifacts?id=2026-06-05/x.pdf",
+    )
+    lines = [l for l in out.split("\n") if l]
+    assert len(lines) <= 3                 # 1-3 short lines
+    assert "\n\n" not in out               # no paragraph breaks
+    assert "full report" in out
+
+
+def test_multiparagraph_model_output_collapses(monkeypatch):
+    monkeypatch.setenv("TELEGRAM_MAX_LINES", "3")
+    prose = "First paragraph.\n\nSecond paragraph.\n\nThird paragraph.\n\nFourth paragraph."
+    out = format_telegram(prose)
+    lines = [l for l in out.split("\n") if l]
+    assert len(lines) <= 3
+    assert "PDF" in out                    # collapsed → pointer
+
+
+def test_big_task_expands_with_leading_tldr():
+    big = "# Portfolio review\n\n" + "\n".join(
+        f"## Holding {i}\n\nDetail line {i} with enough text to matter." for i in range(6)
+    )
+    out = format_dispatch_reply(agent="researcher", markdown=big, deep_link="http://h/a?id=x")
+    assert "TL;DR" in out                   # leads with a one-line TL;DR
+    assert not EMOJI_RE.search(out)         # still emoji-free
+    assert len(out) <= MAX_LEN              # still capped
+    assert len([l for l in out.split("\n") if l]) > 3  # expanded beyond terse

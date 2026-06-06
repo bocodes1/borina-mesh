@@ -159,7 +159,9 @@ def _build_prompt(intent: Intent) -> str:
     return (
         f"Telegram request (read-only intel only — never place orders, transfer funds, "
         f"send messages, or modify anything): {intent.raw_text}{extra}\n\n"
-        f"Produce a concise markdown report."
+        f"Produce a complete markdown report — this becomes the attached PDF, so put the depth here. "
+        f"The FIRST line must be a one-sentence plain summary suitable for a terse chat reply "
+        f"(the chat reply is one short line by default; never write paragraphs in chat). No emojis."
     )
 
 

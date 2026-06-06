@@ -7,9 +7,38 @@ attached PDF; the chat body is a short digest.
 """
 from __future__ import annotations
 
+import os
 import re
 
 MAX_LEN = 4096
+# A completed dispatch is only allowed to expand past the line cap when a
+# concrete "big task" signal fires (long artifact OR multi-section result).
+BIG_TASK_CHARS = 1800
+
+
+def telegram_max_lines() -> int:
+    try:
+        return max(1, int(os.getenv("TELEGRAM_MAX_LINES", "3")))
+    except ValueError:
+        return 3
+
+
+def is_big_task(markdown: str) -> bool:
+    """Concrete trigger (not vibes): long output, OR a structured result with
+    multiple distinct sections / many items."""
+    headings = len(re.findall(r"(?m)^#{1,3}\s", markdown))
+    bullets = len(re.findall(r"(?m)^\s*[-*•]\s", markdown))
+    return len(markdown) > BIG_TASK_CHARS or headings >= 3 or bullets >= 8
+
+
+def cap_lines(text: str, max_lines: int) -> str:
+    """Hard cap on line count. If exceeded, keep the first (max_lines-1) lines
+    and replace the rest with a single PDF pointer."""
+    lines = [ln for ln in text.split("\n") if ln != ""]
+    if len(lines) <= max_lines:
+        return "\n".join(lines)
+    pointer = escape_markdown_v2("(full detail in the attached PDF)")
+    return "\n".join(lines[: max(1, max_lines - 1)] + [pointer])
 
 # Emoji + pictographic + variation selectors + ZWJ.
 _EMOJI_RE = re.compile(
@@ -70,11 +99,13 @@ def truncate(text: str, *, limit: int = MAX_LEN, pointer: str = "") -> str:
     return text[:keep].rstrip() + tail
 
 
-def format_telegram(raw: str, *, limit: int = MAX_LEN) -> str:
-    """Clean + escape an arbitrary message (acks, errors). MarkdownV2-safe."""
+def format_telegram(raw: str, *, limit: int = MAX_LEN, max_lines: int | None = None) -> str:
+    """Clean + escape + line-cap an arbitrary message (acks, errors).
+    MarkdownV2-safe and terse: multi-paragraph input collapses to the cap."""
     cleaned = normalize_whitespace(strip_emojis(raw))
     escaped = escape_markdown_v2(cleaned)
-    return truncate(escaped, limit=limit)
+    capped = cap_lines(escaped, max_lines if max_lines is not None else telegram_max_lines())
+    return truncate(capped, limit=limit)
 
 
 def _headline_and_body(markdown: str) -> tuple[str, list[str]]:
@@ -94,22 +125,31 @@ def _headline_and_body(markdown: str) -> tuple[str, list[str]]:
 
 
 def format_dispatch_reply(*, agent: str, markdown: str, deep_link: str, limit: int = MAX_LEN) -> str:
-    """Short structured digest for a completed dispatch: one headline, up to 4
-    short bullet lines, a blank line, then the artifact deep-link."""
+    """Terse-by-default dispatch reply.
+
+    Default: 1–3 short lines (headline + optional one supporting line + the
+    artifact link), no paragraph breaks. Only when a concrete big-task signal
+    fires (long artifact / multi-section result) does it expand to a longer
+    sectioned digest that still LEADS with a one-line TL;DR. Depth stays in the
+    attached PDF either way.
+    """
     headline, body = _headline_and_body(markdown)
-
     head_line = escape_markdown_v2(f"> {agent}: {headline}")
-    bullet_lines = [escape_markdown_v2(f"• {b}") for b in body]
     link_line = f"[full report]({_escape_link(deep_link)})"
+    max_lines = telegram_max_lines()
 
-    blocks = [head_line]
-    if bullet_lines:
-        blocks.append("\n".join(bullet_lines))
-    blocks.append(link_line)
-    text = "\n\n".join(blocks)
+    if not is_big_task(markdown):
+        lines = [head_line]
+        if max_lines >= 3 and body:
+            lines.append(escape_markdown_v2(f"• {body[0]}"))
+        lines.append(link_line)
+        return truncate("\n".join(lines), limit=limit)
 
+    # Big-task escape hatch — leading TL;DR, scannable, still capped.
+    tldr = escape_markdown_v2(f"> TL;DR {agent}: {headline}")
+    section_lines = [escape_markdown_v2(f"• {b}") for b in body[:5]]
+    pointer = escape_markdown_v2("full detail in the attached PDF")
+    text = "\n".join([tldr, *section_lines, pointer, link_line])
     if len(text) > limit:
-        # Drop body, keep headline + pointer + link.
-        pointer = escape_markdown_v2("(full detail in the attached PDF)")
-        text = f"{head_line}\n\n{pointer}\n\n{link_line}"
-    return text
+        text = "\n".join([tldr, pointer, link_line])
+    return truncate(text, limit=limit)
