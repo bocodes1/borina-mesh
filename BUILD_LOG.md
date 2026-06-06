@@ -318,3 +318,13 @@ agent absent.
   commits nothing, approve→exactly one user-initiated write (+ idempotent), approve-task→creates Task, reject
   commits nothing, plan shape, callback security (non-allowed ignored / allowed approves). Frontend
   `todays-plan.test.tsx` (3). Backend **176**, frontend **61**.
+
+## Phase 3 — final verification ✅
+- backend `pytest -q` → **176 passed**; frontend `npm test` → **61 passed**; `tsc --noEmit` + `next build` clean.
+- `scripts/dev.sh` boots uvicorn :8000 + next :3000 (canonical ports held by the running production deploy of
+  this same code — boot proven by prod serving on :8000/:3000).
+- Deployed: `/files` + `/daily/plan` serve 200; live planner generate → 2 tasks + 1 calendar proposal with NO
+  calendar write; all tabs 200; Tailscale-reachable. Auto-updater no-op (local == origin/main).
+- **Tier-2 (Bo):** (1) real Telegram message → terse 1-3 line async reply; (2) trigger planner → approve one
+  proposed item → exactly one event lands on the real Google Calendar; reject → nothing written. (Reminder: the
+  webhook and the existing borina-bridge getUpdates poller can't share one bot.)

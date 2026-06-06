@@ -4,6 +4,40 @@ All notable changes to Borina Mesh are documented here.
 Format based on [Keep a Changelog](https://keepachangelog.com/); this project
 uses date-based releases.
 
+## [2026-06-05] — Phase 3 Delta: Terse Telegram, Usable Files Tab, Planner Agent
+
+### Added
+- **Personal `planner` agent.** Each morning it drafts a focused task list and
+  **proposes** calendar changes (prep buffers before meetings, a deep-work focus
+  block) from your calendar + open tasks + the daily brief. It **never writes the
+  calendar itself** — every change is a staged proposal you approve individually
+  (in the `/daily` "Today's plan" card or via a Telegram inline button). Approval
+  is the user-initiated action that commits exactly one calendar event (or task);
+  reject commits nothing. New endpoints: `GET /daily/plan`,
+  `POST /daily/plan/{id}/approve|reject`.
+- **Files tab is now usable.** A clean `GET /files?source=&type=&q=` over the real
+  artifact registry: search, filter by source/type, **grouped by origin** (which
+  scheduled task / agent produced each file, or "uploaded"), newest-first live, and
+  an in-pane **preview** (PDF, markdown, images, text) with download and a link back
+  to the producing `/jobs` run. Telegram-sourced files show their original prompt.
+
+### Changed
+- **Telegram replies are terse by default.** The formatter now hard-caps replies to
+  1–3 short lines (`TELEGRAM_MAX_LINES=3`), collapsing multi-paragraph output to a
+  headline + the PDF pointer. It expands to a longer sectioned digest (still leading
+  with a one-line TL;DR) only when a concrete big-task signal fires (long artifact /
+  multi-section result). Still emoji-free, escaped, length-capped.
+
+### Security
+- The planner preserves the calendar's user-initiated-only write rule (propose →
+  approve → commit); the Telegram approve path reuses the fail-closed allow-list. A
+  regression test guards the no-autonomous-write rule.
+
+### Notes
+- Verified green: backend `pytest` 176, frontend `vitest` 61, `tsc` + `next build` clean.
+- Tier-2 (Bo): send a real message → terse async reply; trigger the planner → approve one
+  item → exactly one event on the real Google Calendar; reject → nothing written.
+
 ## [2026-06-05] — Phase 2 Delta: Mission-Control UI, Live Graph, Background Dispatch
 
 A delta on the same-day rebuild — making the console feel **alive**.
