@@ -64,6 +64,22 @@ TASK_TAGS = ("work", "borina", "trading", "personal")
 TASK_PRIORITIES = ("low", "medium", "high")
 
 
+class PlanItem(SQLModel, table=True):
+    """A staged proposal item from the `planner` agent. NEVER auto-committed —
+    a calendar write or task creation only happens when Bo approves this item
+    (the user-initiated action). status: proposed | approved | rejected."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    day: str = Field(index=True)
+    kind: str  # "task" | "calendar"
+    status: str = Field(default="proposed", index=True)
+    title: str
+    rationale: Optional[str] = None
+    payload_json: str = "{}"  # task fields, or calendar event fields
+    created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
+    decided_at: Optional[datetime] = None
+    committed_ref: Optional[str] = None  # created task id / calendar event id
+
+
 class Task(SQLModel, table=True):
     """A personal task backing the /daily tab's task column."""
     id: Optional[int] = Field(default=None, primary_key=True)

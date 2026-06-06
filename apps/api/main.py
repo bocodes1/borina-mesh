@@ -31,6 +31,7 @@ import agents.adset  # noqa
 import agents.inbox  # noqa
 import agents.qa_director  # noqa
 import agents.finance  # noqa
+import agents.planner  # noqa
 
 load_dotenv()
 
@@ -55,6 +56,7 @@ async def lifespan(app: FastAPI):
     scheduler_service.register_defaults()
     scheduler_service.register_finance_brief()
     scheduler_service.register_schedule_daily()
+    scheduler_service.register_planner()
     # Background Telegram dispatch worker (crash-safe queue drain).
     try:
         from dispatch.worker import worker as dispatch_worker

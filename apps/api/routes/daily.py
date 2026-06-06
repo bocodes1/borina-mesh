@@ -4,7 +4,7 @@ Mounted at `/daily` (frontend: `/api/daily/...`). Tasks CRUD lives in
 `routes/tasks.py`; this exposes the rolled-up summary the /daily tab renders:
 the brief's daily-relevant sections + live weather + open tasks.
 """
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, HTTPException
 from sqlmodel import Session, select
 
 from db import get_session
@@ -55,3 +55,42 @@ async def generate_brief(use_agent: bool = Query(True)):
         "date": today_str(),
         "sections_found": sorted((brief or {}).get("sections", {}).keys()),
     }
+
+
+# ── Planner (Phase 3 §3) — staged proposals, approve commits the write ───────
+@router.get("/plan")
+def daily_plan():
+    """Today's planner proposal (tasks + proposed calendar changes + status)."""
+    from planner import get_plan
+
+    return get_plan()
+
+
+@router.post("/plan/generate", status_code=201)
+def generate_plan_now():
+    """Manually run the planner (writes daily-plan.md + proposals; never the calendar)."""
+    from planner import generate_plan
+
+    return generate_plan()
+
+
+@router.post("/plan/{item_id}/approve")
+def approve_plan_item(item_id: int):
+    """Approve one proposed item — THIS is the user-initiated action that commits
+    the calendar write / task creation."""
+    from planner import approve_item
+
+    try:
+        return approve_item(item_id)
+    except KeyError:
+        raise HTTPException(404, "plan item not found")
+
+
+@router.post("/plan/{item_id}/reject")
+def reject_plan_item(item_id: int):
+    from planner import reject_item
+
+    try:
+        return reject_item(item_id)
+    except KeyError:
+        raise HTTPException(404, "plan item not found")

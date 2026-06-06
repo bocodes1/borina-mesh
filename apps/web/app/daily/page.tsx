@@ -5,6 +5,7 @@ import { CloudSun, Plus, Sparkles, Target, ListChecks, Trash2 } from "lucide-rea
 import { api, type DailySummary, type TaskItem } from "@/lib/api";
 import { useAsync } from "@/lib/use-async";
 import { Navbar } from "@/components/navbar";
+import { TodaysPlan } from "@/components/todays-plan";
 import { SectionHeader } from "@/components/ui/section-header";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ErrorState } from "@/components/ui/error-state";
@@ -117,6 +118,8 @@ function DailyBody() {
           </p>
         )}
       </div>
+
+      <TodaysPlan />
 
       <div className="grid gap-6 md:grid-cols-2">
         {/* Tasks column */}

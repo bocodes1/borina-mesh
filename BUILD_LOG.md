@@ -303,3 +303,18 @@ agent absent.
 - **Tests:** backend `test_files_routes.py` (3: source inference, filters+search, newest-first); frontend
   `test/files-browser.test.tsx` (3: grouped listing+controls, search re-query, preview opens). Frontend **58**,
   backend (below).
+
+## Step 3: Personal planner agent (Task #20) ✅
+- Registered `planner` agent. `planner.py` engine: `generate_plan` builds a staged proposal (task items +
+  per-item calendar proposals — prep buffers before real meetings, a deep-work focus block) from calendar +
+  open tasks + the daily brief, writes `reports/{today}/daily-plan.md` + `PlanItem` rows (status=proposed).
+  **It NEVER writes the calendar.** Scheduled @6:30am ET (+ terse Telegram digest via the §1 formatter).
+- The ONLY write path is `approve_item`: a calendar item → the existing user-initiated `google_calendar.create_event`
+  (user_initiated=True); a task item → creates a `Task`. Idempotent. Reject commits nothing.
+- Endpoints: `GET /daily/plan`, `POST /daily/plan/generate`, `POST /daily/plan/{id}/approve`, `/reject`.
+- Telegram inline approve/reject (`callback_query` → `approve:{id}`/`reject:{id}`) reuses the fail-closed allow-list.
+- Frontend: `/daily` "Today's plan" card — tasks + proposed calendar changes with per-item Approve/Reject.
+- **Tests** `test_planner.py` (8): generate-writes-no-calendar, **no-autonomous-write regression**, unapproved
+  commits nothing, approve→exactly one user-initiated write (+ idempotent), approve-task→creates Task, reject
+  commits nothing, plan shape, callback security (non-allowed ignored / allowed approves). Frontend
+  `todays-plan.test.tsx` (3). Backend **176**, frontend **61**.

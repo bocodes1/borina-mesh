@@ -45,6 +45,32 @@ def _allowed_ids() -> set[int]:
     return ids
 
 
+def _handle_plan_callback(data: str, chat_id: int) -> dict:
+    """Approve/reject a planner item from a Telegram inline button. Approval here
+    IS the user-initiated action that commits the calendar write (same model as
+    the /daily approve button). Only reachable for an allow-listed sender."""
+    from planner import approve_item, reject_item
+
+    action, _, sid = data.partition(":")
+    try:
+        item_id = int(sid)
+    except ValueError:
+        return {"ok": True, "status": "bad_data"}
+    try:
+        if action == "approve":
+            res = approve_item(item_id)
+            msg = "Approved." if res.get("committed") else "Approved (calendar not connected)."
+        elif action == "reject":
+            reject_item(item_id)
+            msg = "Rejected."
+        else:
+            return {"ok": True, "status": "unknown_action"}
+    except KeyError:
+        return {"ok": True, "status": "not_found"}
+    dispatcher.send_telegram_message(chat_id, format_telegram(msg))
+    return {"ok": True, "status": action, "item_id": item_id}
+
+
 @router.post("/webhook")
 async def webhook(request: Request):
     # 1. Secret-token header — hard reject (this is the security boundary).
@@ -52,6 +78,15 @@ async def webhook(request: Request):
         raise HTTPException(403, "invalid or missing secret token")
 
     update = await request.json()
+
+    # Inline approve/reject callbacks (planner) — same fail-closed allow-list.
+    cq = update.get("callback_query")
+    if cq:
+        from_id = (cq.get("from") or {}).get("id")
+        if from_id is None or from_id not in _allowed_ids():
+            return {"ok": True, "status": "ignored"}
+        return _handle_plan_callback(cq.get("data") or "", from_id)
+
     update_id = update.get("update_id")
     msg = update.get("message") or update.get("edited_message") or {}
     chat = msg.get("chat", {}) or {}

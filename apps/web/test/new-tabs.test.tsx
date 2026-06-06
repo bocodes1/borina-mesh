@@ -11,6 +11,11 @@ vi.mock("@/lib/api", () => ({
     getCalendarEvents: vi.fn(),
     createCalendarEvent: vi.fn(),
     getPortfolio: vi.fn(),
+    // planner (TodaysPlan on the /daily page) — default to "no plan"
+    getDailyPlan: vi.fn(() => Promise.resolve({ day: "", has_plan: false, raw: null, items: [], tasks: [], calendar: [] })),
+    approvePlanItem: vi.fn(() => Promise.resolve({ status: "approved" })),
+    rejectPlanItem: vi.fn(() => Promise.resolve({ status: "rejected" })),
+    generateDailyPlan: vi.fn(() => Promise.resolve({})),
   },
 }));
 vi.mock("next/navigation", () => ({ usePathname: () => "/daily" }));

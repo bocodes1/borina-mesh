@@ -172,6 +172,40 @@ class SchedulerService:
         except Exception as e:
             print(f"[scheduler] Failed to register schedule_daily: {e}")
 
+    async def _run_planner(self) -> None:
+        """Generate the daily plan proposal (NEVER writes the calendar) + send a
+        terse Telegram digest. Approval happens later via /daily or Telegram."""
+        try:
+            from planner import generate_plan, plan_digest_text
+            summary = generate_plan()
+            print(f"[scheduler] planner proposed {summary['task_count']} tasks + {summary['calendar_count']} changes")
+            import os
+            chat = os.getenv("TELEGRAM_CHAT_ID", "").strip()
+            if chat:
+                from dispatch import dispatcher
+                from dispatch.telegram_format import format_telegram
+                dispatcher.send_telegram_message(int(chat), format_telegram(plan_digest_text()))
+        except Exception as e:
+            print(f"[scheduler] planner error: {e}")
+
+    def register_planner(self) -> None:
+        """Register the planner job at 6:30am America/New_York."""
+        try:
+            from zoneinfo import ZoneInfo
+            tz = ZoneInfo("America/New_York")
+        except Exception:
+            tz = None
+        job_id = "planner"
+        if self._scheduler.get_job(job_id):
+            return
+        try:
+            trigger = CronTrigger(hour=6, minute=30, timezone=tz) if tz else CronTrigger(hour=11, minute=30)
+            self._scheduler.add_job(self._run_planner, trigger=trigger, id=job_id, replace_existing=True)
+            self._schedules["planner"] = "30 6 * * * America/New_York"
+            print("[scheduler] Registered default: planner @ 6:30am ET")
+        except Exception as e:
+            print(f"[scheduler] Failed to register planner: {e}")
+
     def register_finance_brief(self) -> None:
         """Register the finance brief job at 5am America/New_York.
 

@@ -106,6 +106,15 @@ export const api = {
       { method: "POST" },
     ),
 
+  // ── Planner ───────────────────────────────────────────────────────────────
+  getDailyPlan: () => fetchJSON<DailyPlan>("/daily/plan"),
+  generateDailyPlan: () =>
+    fetchJSON<{ day: string; task_count: number; calendar_count: number }>("/daily/plan/generate", { method: "POST" }),
+  approvePlanItem: (id: number) =>
+    fetchJSON<{ status: string; kind?: string; committed?: boolean; note?: string | null }>(`/daily/plan/${id}/approve`, { method: "POST" }),
+  rejectPlanItem: (id: number) =>
+    fetchJSON<{ status: string }>(`/daily/plan/${id}/reject`, { method: "POST" }),
+
   // ── Tasks ───────────────────────────────────────────────────────────────
   listTasks: () => fetchJSON<TaskItem[]>("/tasks"),
   createTask: (body: { title: string; due?: string | null; priority?: string; tag?: string }) =>
@@ -211,6 +220,24 @@ export interface DailyBriefResponse {
   exists: boolean;
   raw: string | null;
   sections: Record<string, string>;
+}
+
+export interface PlanItem {
+  id: number;
+  kind: "task" | "calendar";
+  status: "proposed" | "approved" | "rejected";
+  title: string;
+  rationale: string | null;
+  payload: Record<string, unknown>;
+  committed_ref: string | null;
+}
+export interface DailyPlan {
+  day: string;
+  has_plan: boolean;
+  raw: string | null;
+  items: PlanItem[];
+  tasks: PlanItem[];
+  calendar: PlanItem[];
 }
 
 export interface CalendarEvent {
