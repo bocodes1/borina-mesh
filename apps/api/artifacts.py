@@ -21,6 +21,7 @@ class ArtifactInfo:
     source: str | None = None    # e.g. "telegram"
     agent: str | None = None
     prompt: str | None = None    # original request for telegram-sourced artifacts
+    job_id: int | None = None    # link back to the /jobs run that produced it
 
 
 def _read_meta(day_dir: Path, name: str) -> dict | None:
@@ -75,6 +76,7 @@ def list_artifacts() -> list[ArtifactInfo]:
                     source=meta.get("source"),
                     agent=meta.get("agent"),
                     prompt=meta.get("prompt"),
+                    job_id=meta.get("job_id"),
                 )
                 key = (info.date, info.name)
                 existing = merged.get(key)

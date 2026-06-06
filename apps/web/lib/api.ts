@@ -123,7 +123,36 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ ...body, user_initiated: true }),
     }),
+
+  // ── Files tab ───────────────────────────────────────────────────────────
+  listFiles: (params?: { source?: string; type?: string; q?: string }) => {
+    const qs = new URLSearchParams();
+    if (params?.source && params.source !== "all") qs.set("source", params.source);
+    if (params?.type && params.type !== "all") qs.set("type", params.type);
+    if (params?.q) qs.set("q", params.q);
+    const s = qs.toString();
+    return fetchJSON<FilesResponse>(`/files${s ? `?${s}` : ""}`);
+  },
 };
+
+export interface FileItem {
+  name: string;
+  path: string;
+  date: string;
+  modified: string;
+  size_bytes: number;
+  type: string;
+  source: string;
+  agent: string | null;
+  prompt: string | null;
+  job_id: number | null;
+}
+export interface FilesResponse {
+  files: FileItem[];
+  sources: string[];
+  types: string[];
+  count: number;
+}
 
 // ── Life-OS response types ──────────────────────────────────────────────────
 export interface IntegrationEnvelope<T = unknown> {

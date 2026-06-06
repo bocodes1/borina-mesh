@@ -290,3 +290,16 @@ agent absent.
   chat, no emojis). `TELEGRAM_MAX_LINES` in `.env.example`.
 - **Tests** `test_telegram_format.py` (+4): terse simple reply (≤3 lines, no para breaks), multi-paragraph
   collapses to cap+pointer, big-task expands with leading TL;DR. Full backend suite **165 passed**.
+
+## Step 2: Make the Files tab usable (Task #19) ✅
+- Backend `GET /files?source=&type=&q=` (`routes/files.py`) over the real artifact registry: enriches each file
+  with `type` + inferred `source` (telegram meta → "telegram"; filename prefixes → schedule_daily/planner/finance/
+  agent; else "uploaded"), `job_id` (from sidecar) for linking to /jobs. Filters + filename/prompt search +
+  newest-first + distinct source/type facets. `artifacts.ArtifactInfo` gained `job_id`.
+- Frontend `files-browser.tsx` (replaces the simple artifact grid on the Files tab): search box, source/type
+  filters, **group-by-origin** (each scheduled task / agent / uploaded under its own heading), live (8s) animate-in,
+  download, telegram prompt surfaced, and an **in-pane preview** panel (PDF iframe, image, markdown via
+  react-markdown, text) with download + link to the /jobs run.
+- **Tests:** backend `test_files_routes.py` (3: source inference, filters+search, newest-first); frontend
+  `test/files-browser.test.tsx` (3: grouped listing+controls, search re-query, preview opens). Frontend **58**,
+  backend (below).
