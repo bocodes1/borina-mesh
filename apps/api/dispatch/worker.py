@@ -132,11 +132,17 @@ async def run_job(job_id: int) -> None:
             return
         chat_id = job.telegram_chat_id
         prompt = job.prompt
+        job_agent = job.agent_id
 
     intent = resolve_intent(prompt)
     if not intent.dispatchable:
         _fail_job(job_id, "intent no longer dispatchable")
         return
+    # The webhook already routed this job (thread follow-ups must reach the
+    # thread's agent, not what re-resolving the text would pick); the row's
+    # agent is authoritative.
+    if job_agent:
+        intent.agent = job_agent
 
     ping = asyncio.create_task(_progress_ping(chat_id, intent.agent))
     try:

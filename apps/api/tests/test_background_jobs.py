@@ -107,3 +107,25 @@ def test_duplicate_update_id_runs_once(monkeypatch):
         from sqlmodel import select, func
         count = s.exec(select(func.count()).select_from(Job).where(Job.telegram_update_id == 500)).one()
     assert int(count) == 1
+
+
+def test_run_job_honors_job_agent_over_reresolution(monkeypatch):
+    """A queued job's agent_id (set by the webhook/thread lookup) wins over
+    what re-resolving the prompt text would pick."""
+    import asyncio
+    from dispatch import worker, dispatcher
+    from dispatch.worker import enqueue_job
+
+    seen = {}
+
+    async def fake_produce(intent, chat_id, job_id, requested_at):
+        seen["agent"] = intent.agent
+
+    monkeypatch.setattr(dispatcher, "_produce_and_reply", fake_produce)
+    monkeypatch.setattr(dispatcher, "send_telegram_message", lambda *a, **k: None)
+
+    # "what changed overnight" re-resolves to researcher (fallback) — the job
+    # row says trader (thread follow-up), and trader must win.
+    job = enqueue_job("what changed overnight", "trader", 9001, 6452258223)
+    asyncio.run(worker.run_job(job.id))
+    assert seen["agent"] == "trader"
