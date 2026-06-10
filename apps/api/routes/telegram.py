@@ -73,6 +73,7 @@ def _handle_plan_callback(data: str, chat_id: int) -> dict:
 
 
 _STATUS_RE = re.compile(r"^\s*(status|agents|fleet)\s*\??\s*$", re.IGNORECASE)
+_BUILD_RE = re.compile(r"^\s*(build|ship)\s*[:,]\s+(.+)$", re.IGNORECASE | re.DOTALL)
 
 
 def _fleet_status_text() -> str:
@@ -94,7 +95,21 @@ def _fleet_status_text() -> str:
             lines.append(f"{a.id}: running - {_clean(info.get('current_task'))[:60]}")
         else:
             lines.append(f"{a.id}: idle")
-    return "\n".join([f"{running} running / {len(lines)} agents"] + sorted(lines))
+    out = [f"{running} running / {len(lines)} agents"] + sorted(lines)
+
+    # Active/stuck builder jobs (autonomous code changes).
+    from sqlmodel import Session, select
+    from models import Job, JobStatus
+
+    with Session(engine) as s:
+        builders = s.exec(
+            select(Job).where(Job.kind == "builder",
+                              Job.status == JobStatus.RUNNING)
+        ).all()
+    for b in builders:
+        state = "stuck - waiting on you" if b.qa_verdict == "stuck" else "running"
+        out.append(f"builder job{b.id}: {state} - {_clean(b.prompt)[:60]}")
+    return "\n".join(out)
 
 
 @router.post("/webhook")
@@ -146,6 +161,24 @@ def process_update(update: dict) -> dict:
         text = transcript
         heard = f'Heard: "{transcript[:160]}". '
 
+    # 2b1. Builder: "build: X" / "ship: X" — autonomous code change in a
+    # detached worktree runner. The generic forbidden gate is deliberately not
+    # applied to build texts (a code task mentioning "delete" is not a live
+    # deletion); the builder ships only after independent suite verification.
+    bm = _BUILD_RE.match(text)
+    if bm:
+        from dispatch import builder
+
+        job_id = builder.start_build(bm.group(2).strip(), chat_id)
+        dispatcher.send_telegram_message(
+            chat_id,
+            format_telegram(
+                f"{heard}Builder started (job {job_id}). I will only ping you if "
+                f"stuck - otherwise the next message is the ship report."
+            ),
+        )
+        return {"ok": True, "status": "build_started", "job_id": job_id}
+
     # 2b2. Fleet status command — answered inline, nothing dispatched.
     if _STATUS_RE.match(text):
         status_text = _fleet_status_text()
@@ -160,6 +193,10 @@ def process_update(update: dict) -> dict:
     reply_to = (msg.get("reply_to_message") or {}).get("message_id")
     if reply_to:
         thread = dispatcher.find_thread(chat_id, reply_to)
+        if thread and thread.agent_id == "builder":
+            from dispatch import builder
+
+            return builder.handle_builder_reply(thread, text, chat_id)
         if thread:
             from dispatch.intent import detect_forbidden
 

@@ -481,3 +481,21 @@ agent absent.
   join. Dispatcher branches on task_type=mission with a "Mission: N agents dispatched" progress
   ping. Tests (9).
 - Backend **237** green.
+
+## Phase 6+ — Telegram fleet control + autonomous builder ✅
+- **`status` command** (also "agents"/"fleet"): one line per agent — running + cleaned current
+  task, or idle — plus active/stuck builder jobs. Answered inline, nothing dispatched.
+- **Direct addressing**: "<agent>: task" / "<agent>, task" routes to that exact agent
+  (forbidden gate still first).
+- **Autonomous builder** (`dispatch/builder.py` + `scripts/builder_run.py`): "build: X" from
+  Telegram → Job(kind=builder) + DETACHED runner (start_new_session — survives the kickstarts it
+  performs). Runner: worktree → headless `claude -p` (40-min cap; commit-when-green,
+  BLOCKED.md-when-stuck contract) → `evaluate_worktree` (stuck/nochange/ready; dirty tree =
+  stuck) → INDEPENDENT suite verification (backend pytest; vitest+tsc when web changed;
+  node_modules symlinked) → ship: merge --no-ff → next build if needed → kickstart → health
+  check (rollback to pre-merge sha on failure) → push. Bo is messaged ONLY when stuck —
+  the message is thread-recorded; his reply = guidance (GUIDANCE.md + respawn --resume),
+  'abort' = cancel + cleanup. Orphan recovery spares builder rows with a live pid.
+- The generic forbidden gate deliberately doesn't apply to build texts (a code task saying
+  "remove X" isn't a live deletion); builds gate on independent verification instead.
+- Tests `test_telegram_status.py` (5) + `test_builder.py` (11). Backend **253** green.

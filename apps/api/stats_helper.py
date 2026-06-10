@@ -1,5 +1,6 @@
 """Job statistics helpers."""
 
+import os
 from datetime import datetime
 from sqlmodel import Session, select, func, or_
 
@@ -18,13 +19,27 @@ def fail_orphaned_running_jobs(engine) -> int:
                 or_(Job.kind == None, Job.kind != "telegram_dispatch"),  # noqa: E711
             )
         ).all()
+        failed = 0
         for job in orphans:
+            # Builders run detached and SURVIVE API restarts — spare them
+            # while their pid is alive.
+            if job.kind == "builder" and job.worker_pid and _pid_alive(job.worker_pid):
+                continue
             job.status = JobStatus.FAILED
             job.completed_at = datetime.utcnow()
             job.error = "orphaned by service restart"
             session.add(job)
+            failed += 1
         session.commit()
-        return len(orphans)
+        return failed
+
+
+def _pid_alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+        return True
+    except OSError:
+        return False
 
 
 def compute_stats(engine) -> dict:
