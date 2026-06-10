@@ -81,6 +81,14 @@ def detect_forbidden(text: str) -> Optional[str]:
 def _alias_match(text: str) -> Optional[Intent]:
     low = text.lower()
 
+    # Mission: explicit multi-agent orchestration. Checked first so "mission:
+    # research X" isn't claimed by a single-agent alias below.
+    if re.match(r"^\s*mission\b[:,]?\s+", low):
+        return Intent(
+            raw_text=text, agent="ceo", task_type="mission",
+            confidence=0.95, source="alias",
+        )
+
     # Worked example (spec §8b.3): stocks/investments/portfolio + report/news/verify
     # → researcher + finance_deep_dive.
     finance_subject = re.search(r"\b(stock|stocks|investment|investments|portfolio|holdings|equit)", low)
