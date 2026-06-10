@@ -84,7 +84,7 @@ _PROMPT_BOX_RE = re.compile(r"^[\s│]*>\s*$")
 _HINT_LINE_RE = re.compile(r"\b(esc to interrupt|tokens?\b|context left|ctrl\+o to expand|^\s*\?\s+for shortcuts)", re.IGNORECASE)
 # Post-response TUI chrome: timing line, feedback prompt, input caret, mode bar.
 _RESPONSE_CHROME_RE = re.compile(
-    r"^\s*(✻ Worked for\b|● How is Claude doing\b|⏵⏵|❯\s*$|\d+:\s*(Bad|Fine|Good|Dismiss)\b)"
+    r"^\s*(✻\s|● How is Claude doing\b|⏵⏵|❯|\d+:\s*(Bad|Fine|Good|Dismiss)\b)"
 )
 
 _TRUST_DIALOG_MARKERS = (

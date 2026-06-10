@@ -129,7 +129,20 @@ Output ONLY a JSON array (no prose, no code fences). Each element:
   {{"kind": "task" | "calendar", "title": "...", "rationale": "...", "payload": {{...}}}}
 - kind=calendar payload: {{"summary": "...", "start": "ISO-8601", "end": "ISO-8601"}}
 - kind=task payload: {{"title": "...", "tag": "work|personal|borina", "priority": "high|medium|low"}}
+
+ALSO save the exact same JSON array to proposals/{day}.json under your working
+directory (create the folder if needed) — that file is the canonical handoff.
 </task>"""
+
+
+def _agent_proposals_file(day: str) -> Path:
+    """Where the planner agent saves its JSON proposals inside its workdir.
+    Reading this beats scraping the tmux pane (which wraps long JSON strings)."""
+    from agents.runner_v2 import AGENT_REGISTRY, _workdir_root
+
+    entry = AGENT_REGISTRY.get("planner", {})
+    workdir = Path(entry.get("workdir") or (_workdir_root() / "planner"))
+    return workdir / "proposals" / f"{day}.json"
 
 
 async def _call_agent(prompt: str) -> str:
@@ -150,7 +163,13 @@ def _parse_agent_proposals(text: str) -> Optional[list[dict]]:
     try:
         raw = json.loads(m.group(0))
     except Exception:
-        return None
+        # A tmux pane wraps long lines, leaving raw newlines inside JSON string
+        # literals. Newlines between tokens are insignificant, so collapsing
+        # them is structurally safe and repairs the wrapped strings.
+        try:
+            raw = json.loads(re.sub(r"\n\s*", " ", m.group(0)))
+        except Exception:
+            return None
     if not isinstance(raw, list):
         return None
     valid: list[dict] = []
@@ -209,10 +228,20 @@ def _agent_context(day: str) -> dict:
 async def _run_agent_proposals(day: str) -> Optional[list[dict]]:
     try:
         prompt = PLANNER_TASK_PROMPT.format(**_agent_context(day))
-        return _parse_agent_proposals(await _call_agent(prompt))
+        output = await _call_agent(prompt)
     except Exception as exc:  # noqa: BLE001
         print(f"[planner] agent path failed, using heuristics: {exc}")
         return None
+    # Preferred handoff: the file the agent wrote; pane capture as fallback.
+    try:
+        f = _agent_proposals_file(day)
+        if f.exists():
+            parsed = _parse_agent_proposals(f.read_text())
+            if parsed:
+                return parsed
+    except Exception as exc:  # noqa: BLE001
+        print(f"[planner] workdir proposals unreadable: {exc}")
+    return _parse_agent_proposals(output)
 
 
 def _render_plan_md(day: str, proposals: list[dict], source: str = "fallback") -> str:

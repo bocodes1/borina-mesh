@@ -361,3 +361,26 @@ agent absent.
   workdir-file handoff, echo→fallback, full-echo delta strip, chrome strip, JSON parse (fences),
   garbage/invalid-item rejection, agent-proposals staged with zero calendar writes, garbage→fallback.
   Backend **187** green.
+
+## Step 3: Telegram polling mode + bridge retired + keys ✅
+- **Why polling:** Telegram needs public HTTPS to push a webhook; the tailnet host isn't publicly
+  reachable. getUpdates long-polling dials OUT to api.telegram.org — same UX, zero public exposure.
+- **`dispatch/poller.py`:** TelegramPoller, on only when `TELEGRAM_DISPATCH_MODE=polling` + bot
+  token set. Calls deleteWebhook on start (polling owns the stream), long-polls getUpdates (25s),
+  feeds every update through the SAME fail-closed pipeline as the webhook — refactored the webhook's
+  post-secret logic into `routes.telegram.process_update` (allow-list → intent → idempotent enqueue)
+  shared by both. Offset in-memory; restart redelivers unacked updates and update_id idempotency
+  dedupes. Started/stopped in the lifespan next to the dispatch worker.
+- **Webhook unchanged + still fail-closed** (secret token required); polling transport is
+  authenticated by the bot token instead.
+- **Live-run fixes from §2 verification:** planner agent JSON now handed off via
+  `proposals/{day}.json` in the agent workdir (pane wrap was breaking JSON string literals —
+  observed live); `_parse_agent_proposals` repairs pane-wrapped JSON (newline collapse retry);
+  chrome strip catches any `✻` spinner line (saw "Sautéed", not just "Worked").
+- **Env:** `.env` got `TELEGRAM_DISPATCH_MODE=polling`, `TELEGRAM_ALLOWED_CHAT_IDS=6452258223`,
+  `MESH_PUBLIC_HOST`; `.env.example` documents the new mode.
+- **Bridge retired:** `com.wenbo.borina-bridge` booted out; plist renamed `.disabled` (reversible).
+  The mesh is now @borinabot's sole consumer.
+- **Tests** `test_telegram_polling.py` (7): disabled-by-default, mode+token gate, start no-op when
+  disabled, allowed→enqueue + offset ack, non-allowed dropped (still acked), processing-error
+  survival, webhook/poller share `process_update`. Plus 3 new live-fix tests. Backend **196** green.

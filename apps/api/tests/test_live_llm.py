@@ -6,6 +6,7 @@ proposals only — `create_event` is never called by generation, agent or not.
 """
 import asyncio
 import json
+from pathlib import Path
 
 import pytest
 from sqlmodel import select
@@ -146,6 +147,7 @@ def test_strip_ui_chrome_drops_response_chrome():
         [
             "keep me",
             "✻ Worked for 1m 26s",
+            "✻ Sautéed for 1m 22s",
             "● How is Claude doing this session? (optional)",
             "  1: Bad    2: Fine   3: Good   0: Dismiss",
             "❯",
@@ -196,7 +198,33 @@ def test_parse_agent_proposals_rejects_garbage():
     assert planner._parse_agent_proposals(json.dumps(bad)) is None
 
 
+def test_parse_agent_proposals_repairs_pane_wrapped_json():
+    # A tmux pane wraps long strings across lines (raw newline + indent inside
+    # the literal) — this broke the first live run on 2026-06-09.
+    wrapped = json.dumps(AGENT_PROPOSALS, indent=2).replace(
+        "highest leverage", "highest\n  leverage"
+    )
+    parsed = planner._parse_agent_proposals(wrapped)
+    assert parsed is not None and parsed[0]["rationale"] == "highest leverage"
+
+
+def test_generate_plan_with_agent_prefers_workdir_file(tmp_path, monkeypatch):
+    calls = _spy_create_event(monkeypatch)
+    f = tmp_path / "proposals.json"
+    f.write_text(json.dumps(AGENT_PROPOSALS))
+    monkeypatch.setattr(planner, "_agent_proposals_file", lambda day: f)
+
+    async def fake_call(prompt):
+        return "pane junk, no json"
+
+    monkeypatch.setattr(planner, "_call_agent", fake_call)
+    summary = asyncio.run(planner.generate_plan_with_agent())
+    assert summary["source"] == "agent"
+    assert calls == []
+
+
 def test_generate_plan_with_agent_uses_proposals(monkeypatch):
+    monkeypatch.setattr(planner, "_agent_proposals_file", lambda day: Path("/nonexistent"))
     calls = _spy_create_event(monkeypatch)
 
     async def fake_call(prompt):
@@ -215,6 +243,7 @@ def test_generate_plan_with_agent_uses_proposals(monkeypatch):
 
 def test_generate_plan_with_agent_falls_back_on_garbage(monkeypatch):
     calls = _spy_create_event(monkeypatch)
+    monkeypatch.setattr(planner, "_agent_proposals_file", lambda day: Path("/nonexistent"))
 
     async def fake_call(prompt):
         return "I could not produce JSON, sorry"

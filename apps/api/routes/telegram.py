@@ -77,8 +77,13 @@ async def webhook(request: Request):
     if not _check_secret(request.headers.get(SECRET_HEADER, "")):
         raise HTTPException(403, "invalid or missing secret token")
 
-    update = await request.json()
+    return process_update(await request.json())
 
+
+def process_update(update: dict) -> dict:
+    """Checks 2+3 and dispatch for ONE Telegram update. Shared by the webhook
+    (after its secret check) and the getUpdates poller (whose transport is
+    authenticated by the bot token instead). Fail-closed allow-list either way."""
     # Inline approve/reject callbacks (planner) — same fail-closed allow-list.
     cq = update.get("callback_query")
     if cq:

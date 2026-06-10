@@ -64,7 +64,18 @@ async def lifespan(app: FastAPI):
         print("[dispatch-worker] started")
     except Exception as e:
         print(f"[dispatch-worker] failed to start: {e}")
+    # Inbound getUpdates poller (only when TELEGRAM_DISPATCH_MODE=polling).
+    try:
+        from dispatch.poller import poller as telegram_poller
+        telegram_poller.start()
+    except Exception as e:
+        print(f"[telegram-poller] failed to start: {e}")
     yield
+    try:
+        from dispatch.poller import poller as telegram_poller
+        telegram_poller.stop()
+    except Exception:
+        pass
     try:
         from dispatch.worker import worker as dispatch_worker
         dispatch_worker.stop()
