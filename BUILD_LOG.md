@@ -328,3 +328,13 @@ agent absent.
 - **Tier-2 (Bo):** (1) real Telegram message → terse 1-3 line async reply; (2) trigger planner → approve one
   proposed item → exactly one event lands on the real Google Calendar; reject → nothing written. (Reminder: the
   webhook and the existing borina-bridge getUpdates poller can't share one bot.)
+
+# Phase 4 — 2026-06-09
+
+## Step 1: Repo cleanup (parallel-run leftovers) ✅
+- Removed the 9 registered parallel-agents worktrees (`.worktrees/{judge,pane-1..8}`) + their branches
+  (`pane-1..8`, `parallel/judge-merge`) — winner already merged to main at the phase-3 commits.
+- Deleted stray backups: `apps.old-main-tree.bak/` (1.0G), nested `borina-mesh/` (531M),
+  `borina-mesh-apps/`, `scorecards/`, `apps/api/main.py.conflict.bak`, `apps/web/tsconfig.tsbuildinfo`.
+- `.gitignore`: added `reports/` (runtime briefs/PDFs), `*.tsbuildinfo`, `.worktrees/`.
+- Committed `scripts/auto-update.sh` — launchd (`com.borina.mesh-updater`) runs it; it was untracked.
