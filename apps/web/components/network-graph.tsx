@@ -137,11 +137,13 @@ export function NetworkGraph() {
           if (!a || !b) return null;
           return <circle key={`p-${p.id}`} data-particle cx={a.x + (b.x - a.x) * p.t} cy={a.y + (b.y - a.y) * p.t} r={3} fill="hsl(var(--brand))" />;
         })}
-        {nodesRef.current.map((n) => {
+        {nodesRef.current.map((n, i) => {
           const isHub = n.id === HUB;
           const agent = agentById(n.id);
           const running = agent?.status === "running" || (activeRef.current[n.id] ?? 0) > now;
           const r = isHub ? 16 : 11;
+          // Alternate labels above/below so adjacent nodes can't collide.
+          const labelY = isHub || i % 2 === 0 ? r + 13 : -(r + 6);
           const color = isHub
             ? "hsl(var(--brand-2))"
             : running
@@ -167,7 +169,7 @@ export function NetworkGraph() {
               {running ? <circle r={r + 6} fill="none" stroke="hsl(var(--brand))" strokeWidth={1} opacity={0.4} className="dot-run" /> : null}
               <circle r={r} fill="hsl(var(--surface-2))" stroke={color} strokeWidth={2} />
               <circle r={3} fill={color} />
-              <text y={r + 13} textAnchor="middle" className="fill-foreground/80 font-mono" fontSize={10}>
+              <text y={labelY} textAnchor="middle" className="fill-foreground/80 font-mono" fontSize={10}>
                 {isHub ? "MESH" : agent?.name ?? n.id}
               </text>
             </g>

@@ -10,6 +10,7 @@ import { getAgentVisual } from "@/lib/agent-icons";
 import { ModelBadge } from "./model-badge";
 import { StatusDot } from "./status-dot";
 import type { Agent } from "@/lib/types";
+import { cleanTaskLabel } from "@/lib/utils";
 
 interface AgentCardProps {
   agent: Agent;
@@ -64,7 +65,7 @@ export function AgentCard({ agent, onClick, index }: AgentCardProps) {
 
             {status === "running" && agent.current_task && (
               <div className="text-xs text-blue-400 mb-2 truncate animate-pulse">
-                {agent.current_task}
+                {cleanTaskLabel(agent.current_task)}
               </div>
             )}
 

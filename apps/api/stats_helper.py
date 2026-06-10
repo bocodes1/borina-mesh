@@ -1,9 +1,30 @@
 """Job statistics helpers."""
 
 from datetime import datetime
-from sqlmodel import Session, select, func
+from sqlmodel import Session, select, func, or_
 
 from models import Job, JobStatus
+
+
+def fail_orphaned_running_jobs(engine) -> int:
+    """Mark non-telegram jobs left RUNNING by a crash/restart as failed, so the
+    status bar's RUNNING count reflects reality (84 stale rows observed live on
+    2026-06-09). telegram_dispatch jobs are excluded — dispatch.worker
+    re-queues those on startup."""
+    with Session(engine) as session:
+        orphans = session.exec(
+            select(Job).where(
+                Job.status == JobStatus.RUNNING,
+                or_(Job.kind == None, Job.kind != "telegram_dispatch"),  # noqa: E711
+            )
+        ).all()
+        for job in orphans:
+            job.status = JobStatus.FAILED
+            job.completed_at = datetime.utcnow()
+            job.error = "orphaned by service restart"
+            session.add(job)
+        session.commit()
+        return len(orphans)
 
 
 def compute_stats(engine) -> dict:

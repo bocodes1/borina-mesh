@@ -10,7 +10,7 @@ import { StatusDot } from "@/components/ui/status-dot";
 import { LiveValue } from "@/components/ui/live-value";
 import { EmptyState } from "@/components/ui/empty-state";
 import { SkeletonRows } from "@/components/ui/loading-skeleton";
-import { cn } from "@/lib/utils";
+import { cn, cleanTaskLabel, isScheduledPrompt } from "@/lib/utils";
 
 const DOT: Record<string, string> = {
   queued: "idle",
@@ -109,7 +109,8 @@ export function JobLog() {
                   <StatusDot status={DOT[j.status] ?? "idle"} size={8} />
                   <span className="w-10 shrink-0 tabular-nums text-muted-foreground/60">#{j.id}</span>
                   <span className="w-28 shrink-0 truncate text-foreground/90">{j.agent_id}</span>
-                  <span className="flex-1 truncate text-muted-foreground">{j.prompt}</span>
+                  <span className="flex-1 truncate text-muted-foreground">{cleanTaskLabel(j.prompt)}</span>
+                  {isScheduledPrompt(j.prompt) ? <span className="shrink-0 rounded bg-foreground/10 px-1.5 text-[10px] text-muted-foreground">cron</span> : null}
                   {j.kind === "telegram_dispatch" ? <span className="shrink-0 rounded bg-brand-2/15 px-1.5 text-[10px] text-brand-2">tg</span> : null}
                   <span className={cn("w-16 shrink-0 text-right uppercase", COLOR[j.status])}>{j.status}</span>
                   <span className="w-10 shrink-0 text-right tabular-nums text-muted-foreground/60">{j.status === "completed" || j.status === "failed" ? dur(j) : rel(j.created_at)}</span>

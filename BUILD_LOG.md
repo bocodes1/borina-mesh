@@ -384,3 +384,22 @@ agent absent.
 - **Tests** `test_telegram_polling.py` (7): disabled-by-default, mode+token gate, start no-op when
   disabled, allowed→enqueue + offset ack, non-allowed dropped (still acked), processing-error
   survival, webhook/poller share `process_update`. Plus 3 new live-fix tests. Backend **196** green.
+
+## Step 4: Visual pass — Mesh / Network / Jobs (data-truth polish) ✅
+- Grounded in live screenshots of all four tabs (Playwright). Files tab needed nothing.
+- **Task-label noise:** Mesh fleet cards + every Jobs row displayed the raw scheduler prompt
+  ("[scheduled] Run your scheduled daily task. Current time: 677454.631"). New
+  `cleanTaskLabel`/`isScheduledPrompt` in `lib/utils` strip the tag + machine timestamp at display
+  time (fixes historical rows too); Jobs rows get a muted `cron` badge alongside the existing `tg`
+  badge; the raw prompt stays in the job drawer. Scheduler now stamps prompts with ISO UTC
+  ("Now: …Z") instead of monotonic seconds.
+- **Status-bar truth:** home page showed RUNNING 84 — stale rows: the scheduler creates jobs as
+  RUNNING and restarts stranded them (orphan recovery only covered telegram_dispatch). New
+  `fail_orphaned_running_jobs` runs at startup (lifespan), failing non-telegram RUNNING leftovers
+  with "orphaned by service restart"; telegram jobs stay with the dispatch worker's re-queue.
+- **Network graph:** node labels alternate above/below the node so adjacent agents ("Polymarket
+  Intel" / "Ecommerce Scout") can't collide.
+- **Favicon:** `app/icon.svg` (terminal prompt glyph, phosphor green on near-black) — kills the
+  404 on every page load.
+- **Tests:** backend `test_orphaned_jobs.py` (orphans failed, telegram + completed untouched);
+  frontend `clean-task-label.test.ts` (5). Backend **197**, frontend **65**, tsc + build clean.

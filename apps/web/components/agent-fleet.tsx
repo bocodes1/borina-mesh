@@ -12,7 +12,7 @@ import { TerminalCursor } from "@/components/ui/terminal-cursor";
 import { SectionHeader } from "@/components/ui/section-header";
 import { ErrorState } from "@/components/ui/error-state";
 import { SkeletonCard } from "@/components/ui/loading-skeleton";
-import { cn } from "@/lib/utils";
+import { cn, cleanTaskLabel } from "@/lib/utils";
 
 function relTime(iso?: string | null): string {
   if (!iso) return "never";
@@ -67,7 +67,7 @@ function FleetCard({
       <div className="mt-1.5 h-8">
         {isRunning && agent.current_task ? (
           <p className="line-clamp-2 font-mono text-[11px] text-brand/90">
-            {agent.current_task}
+            {cleanTaskLabel(agent.current_task)}
             <TerminalCursor className="ml-0.5" />
           </p>
         ) : (

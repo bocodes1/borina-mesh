@@ -251,7 +251,7 @@ class SchedulerService:
             ))
             return
 
-        prompt = f"Run your scheduled daily task. Current time: {asyncio.get_event_loop().time()}"
+        prompt = f"Run your scheduled daily task. Now: {datetime.utcnow().isoformat(timespec='seconds')}Z"
 
         with Session(engine) as session:
             job = Job(

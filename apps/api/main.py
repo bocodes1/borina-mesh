@@ -42,6 +42,14 @@ async def lifespan(app: FastAPI):
     print("Borina Mesh starting...")
     init_db()
     try:
+        from db import engine
+        from stats_helper import fail_orphaned_running_jobs
+        n = fail_orphaned_running_jobs(engine)
+        if n:
+            print(f"[jobs] failed {n} orphaned running job(s)")
+    except Exception as e:
+        print(f"[jobs] orphan recovery error: {e}")
+    try:
         from wiki_engine.paths import bootstrap_schema_file, bootstrap_subcategory_files, ensure_vault_layout
         ensure_vault_layout()
         bootstrap_schema_file()
