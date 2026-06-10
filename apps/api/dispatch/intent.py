@@ -144,13 +144,24 @@ def resolve_intent(text: str) -> Intent:
     raw = _classify_llm(text) or {}
     agent = raw.get("agent")
     conf = float(raw.get("confidence") or 0.0)
-    if not agent or agent not in KNOWN_AGENTS or conf < _threshold():
-        return Intent(raw_text=text, clarify=True, confidence=conf, source="llm")
+    if agent and agent in KNOWN_AGENTS and conf >= _threshold():
+        return Intent(
+            raw_text=text,
+            agent=agent,
+            task_type=raw.get("task_type"),
+            params=raw.get("params") or {},
+            confidence=conf,
+            source="llm",
+        )
+
+    # 4. General-question fallback: a non-forbidden message no specialist
+    # claimed goes to the read-only researcher with the raw text as its
+    # prompt — natural speech (esp. voice notes) must always prompt the mesh,
+    # never bounce with "rephrase". The forbidden gate above still refuses.
     return Intent(
         raw_text=text,
-        agent=agent,
-        task_type=raw.get("task_type"),
-        params=raw.get("params") or {},
-        confidence=conf,
-        source="llm",
+        agent="researcher",
+        task_type="general_question",
+        confidence=0.5,
+        source="fallback",
     )

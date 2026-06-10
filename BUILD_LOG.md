@@ -450,3 +450,13 @@ agent absent.
 - **Tests** `test_telegram_voice.py` (5): transcript routes like text, non-allowed never touches
   media, transcribe-failure fails closed, caps block pre-download, no-token no-download.
   Backend **215** green.
+
+## Step 5: General-question fallback in the intent router ✅
+- Live finding: Bo's voice note transcribed fine but never dispatched — `_classify_llm` is an
+  offline stub (no API key on this box), so anything missing the keyword aliases bounced with
+  "could you rephrase?". Natural speech rarely hits the aliases.
+- `resolve_intent` stage 4: non-forbidden text that no specialist claimed now routes to the
+  read-only **researcher** as `general_question` (confidence 0.5, source "fallback") with the raw
+  message as prompt. The forbidden-action gate still runs FIRST and still refuses. Backend **216**.
+- Also confirmed the 409 getUpdates errors are restart bursts (old long-poll lingering a few
+  seconds server-side), not a second consumer — steady state is clean.

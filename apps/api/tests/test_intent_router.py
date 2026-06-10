@@ -52,10 +52,19 @@ def test_forbidden_actions_refused(text):
     assert intent.forbidden_reason
 
 
-def test_low_confidence_asks_to_rephrase(monkeypatch):
-    # No alias match + LLM declines (offline) → clarify, not a wrong guess.
-    intent = resolve_intent("zxcv qwerty asdf")
-    assert intent.clarify is True
+def test_unmatched_text_falls_back_to_researcher(monkeypatch):
+    # No alias match + LLM declines (offline) → general-question fallback to the
+    # read-only researcher, never a "rephrase" bounce (Bo's voice notes hit this).
+    intent = resolve_intent("what do you think happens to yields after tomorrow")
+    assert intent.agent == "researcher"
+    assert intent.source == "fallback"
+    assert intent.dispatchable is True
+
+
+def test_forbidden_still_refused_before_fallback(monkeypatch):
+    # The fallback must never swallow the forbidden gate.
+    intent = resolve_intent("buy 10 NVDA for me")
+    assert intent.forbidden is True
     assert intent.dispatchable is False
 
 
