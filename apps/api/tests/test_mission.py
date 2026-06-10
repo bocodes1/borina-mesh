@@ -96,3 +96,26 @@ def test_run_mission_synthesis_failure_joins_sections(monkeypatch):
     monkeypatch.setattr(mission, "run_agent", fake_run_agent)
     md = asyncio.run(mission.run_mission("x"))
     assert "raw findings" in md  # deterministic join fallback
+
+
+def test_dispatcher_routes_mission_task_type(monkeypatch, tmp_path):
+    from dispatch import dispatcher
+    from dispatch.intent import Intent
+
+    async def fake_mission(text, progress=None):
+        if progress:
+            progress("Mission: 2 agents dispatched")
+        return "# Mission report\n\nDone."
+
+    monkeypatch.setattr("dispatch.mission.run_mission", fake_mission)
+    monkeypatch.setattr(dispatcher, "render_markdown_pdf", lambda md, p: p)
+    sent = []
+    monkeypatch.setattr(dispatcher, "send_telegram_message",
+                        lambda cid, txt: sent.append(txt) or 1)
+    monkeypatch.setattr(dispatcher, "send_telegram_document", lambda *a, **k: None)
+
+    intent = Intent(raw_text="mission: read the room", agent="ceo",
+                    task_type="mission", confidence=0.95, source="alias")
+    res = asyncio.run(dispatcher.dispatch_intent(intent, chat_id=6452258223))
+    assert any("Mission" in s for s in sent)  # progress ping forwarded
+    assert "Done." in res["summary"]

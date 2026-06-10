@@ -123,7 +123,16 @@ async def _produce_and_reply(intent: Intent, chat_id: int, job_id: int, requeste
     the queued job, then marks it running before calling this)."""
     day = today_str()
     prompt = _build_prompt(intent)
-    markdown = await run_agent(intent.agent, prompt)
+    if intent.task_type == "mission":
+        from dispatch.mission import run_mission
+        from dispatch.telegram_format import format_telegram
+
+        markdown = await run_mission(
+            intent.raw_text,
+            progress=lambda m: send_telegram_message(chat_id, format_telegram(m)),
+        )
+    else:
+        markdown = await run_agent(intent.agent, prompt)
     if not markdown.strip():
         markdown = f"# {intent.agent} report\n\n(No output produced.)"
 
