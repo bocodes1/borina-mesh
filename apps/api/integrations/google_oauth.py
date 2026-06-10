@@ -52,8 +52,8 @@ def auth_url(state: str) -> str:
         "redirect_uri": redirect_uri(),
         "response_type": "code",
         "scope": SCOPE,
-        "access_type": "offline",  # ask for a refresh_token
-        "prompt": "consent",       # ...even on re-consent
+        "access_type": "offline",            # ask for a refresh_token
+        "prompt": "select_account consent",  # let Bo pick the account, force re-consent
         "state": state,
     })
 
