@@ -182,6 +182,12 @@ def main() -> None:
             notify(chat_id, f"Build {a.job_id} failed to start: could not create a worktree.")
             return
 
+    # .venv is gitignored — share the main checkout's so `apps/api/.venv/...`
+    # resolves inside the worktree exactly as the prompt describes.
+    venv_link = wt / "apps" / "api" / ".venv"
+    if not venv_link.exists():
+        venv_link.symlink_to(API / ".venv")
+
     guidance = ""
     gfile = wt / "GUIDANCE.md"
     if gfile.exists():
