@@ -41,7 +41,7 @@ def test_auth_url_requests_offline_consent():
     url = google_oauth.auth_url(state="st4te")
     assert url.startswith("https://accounts.google.com/o/oauth2/auth?")
     assert "client_id=test-client-id" in url
-    assert "access_type=offline" in url and "prompt=consent" in url
+    assert "access_type=offline" in url and "select_account+consent" in url
     assert "state=st4te" in url
     assert "calendar.events" in url
 
