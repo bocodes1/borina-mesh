@@ -28,8 +28,10 @@ def _oauth_configured() -> bool:
 
 
 def _access_token() -> str:
-    # Server-side token (populated by the OAuth callback in a real deploy).
-    return env("GOOGLE_OAUTH_ACCESS_TOKEN")
+    # Server-side token file with auto-refresh (env var override still wins).
+    from .google_oauth import get_access_token
+
+    return get_access_token()
 
 
 def status() -> IntegrationResult:

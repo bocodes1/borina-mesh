@@ -403,3 +403,22 @@ agent absent.
   404 on every page load.
 - **Tests:** backend `test_orphaned_jobs.py` (orphans failed, telegram + completed untouched);
   frontend `clean-task-label.test.ts` (5). Backend **197**, frontend **65**, tsc + build clean.
+
+# Phase 5 — 2026-06-10
+
+## Step 1: Google Calendar OAuth — real consent flow + auto-refresh ✅
+- `integrations/google_oauth.py`: consent URL (offline + prompt=consent for a refresh token),
+  `exchange_code`, chmod-600 server-side token file (`~/.borina/google_oauth_token.json`,
+  override via GOOGLE_OAUTH_TOKEN_FILE), `get_access_token()` auto-refreshes hourly-expiring
+  access tokens (refresh_token preserved across refresh replies that omit it). Env
+  GOOGLE_OAUTH_ACCESS_TOKEN still wins when set (tests/manual). CSRF: random `state` persisted
+  at /start, compare_digest-validated at /callback.
+- Routes: `GET /calendar/oauth/start` (redirect to Google) + `GET /calendar/oauth/callback`
+  (exchange + "connected" page). `google_calendar._access_token()` now reads the managed token.
+  The user-initiated-only write gate is untouched.
+- conftest isolates GOOGLE_OAUTH_TOKEN_FILE to the test tmp dir.
+- **Tests** `test_google_oauth.py` (10): auth-url params, exchange persists, refresh preserves
+  refresh_token, env override, empty when unauthorized, calendar status via token file, start
+  redirect, callback exchange + state validation (+ bad-state 400), start without creds 400.
+  Backend **207** green.
+- Bo's borinamesh client id/secret live in `apps/api/.env` only (gitignored).

@@ -25,6 +25,8 @@ os.environ["DATABASE_URL"] = f"sqlite:///{_TEST_DB}"
 _TEST_REPORTS = pathlib.Path(tempfile.mkdtemp(prefix="borina_test_reports_"))
 os.environ["OBSIDIAN_VAULT_PATH"] = ""
 os.environ["REPORTS_DIR"] = str(_TEST_REPORTS)
+# Keep tests away from the real ~/.borina Google OAuth token file.
+os.environ["GOOGLE_OAUTH_TOKEN_FILE"] = str(_TEST_REPORTS / "google_oauth_token.json")
 
 # Deterministic, credential-free defaults so integration wrappers take their
 # "not connected" path and tests never reach a real external service.

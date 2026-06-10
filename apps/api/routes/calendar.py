@@ -85,3 +85,36 @@ def create_event(body: EventCreate):
         event["attendees"] = [{"email": a} for a in body.attendees]
     result = google_calendar.create_event(event, user_initiated=True)
     return result.to_dict()
+
+
+# ── Google OAuth consent flow (Phase 5) ──────────────────────────────────────
+# Tokens are exchanged and stored server-side only (integrations/google_oauth);
+# nothing sensitive transits the frontend. `state` is generated at /start and
+# validated at /callback (CSRF guard).
+
+@router.get("/oauth/start")
+def oauth_start():
+    """Redirect the browser to Google's consent screen."""
+    from fastapi.responses import RedirectResponse
+    from integrations import google_oauth
+
+    if not google_oauth.configured():
+        raise HTTPException(400, "GOOGLE_OAUTH_CLIENT_ID/SECRET not set")
+    return RedirectResponse(google_oauth.auth_url(state=google_oauth.new_state()))
+
+
+@router.get("/oauth/callback")
+def oauth_callback(code: Optional[str] = Query(None), state: Optional[str] = Query(None), error: Optional[str] = Query(None)):
+    """Exchange the consent code for tokens (stored server-side)."""
+    import html as _html
+    from fastapi.responses import HTMLResponse
+    from integrations import google_oauth
+
+    if error:
+        return HTMLResponse(f"<h3>Google OAuth failed: {_html.escape(error)}</h3>", status_code=400)
+    if not code:
+        raise HTTPException(400, "missing code")
+    if not google_oauth.check_state(state or ""):
+        raise HTTPException(400, "state mismatch — restart at /calendar/oauth/start")
+    google_oauth.exchange_code(code)
+    return HTMLResponse("<h3>Google Calendar connected. You can close this tab.</h3>")
