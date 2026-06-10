@@ -7,6 +7,7 @@ can never reach the write branch. OAuth tokens live server-side, never in URLs.
 """
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Optional
 
 from .base import (
@@ -21,6 +22,17 @@ from .base import (
 
 SOURCE = "google_calendar"
 API_BASE = "https://www.googleapis.com/calendar/v3"
+
+
+def _normalize_dt(value: str) -> str:
+    """RFC3339 with offset — naive timestamps get the machine's local zone."""
+    try:
+        dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.astimezone()
+        return dt.isoformat()
+    except Exception:
+        return value
 
 
 def _oauth_configured() -> bool:
@@ -91,6 +103,12 @@ def create_event(
         )
     if not _oauth_configured() or not _access_token():
         return not_connected(SOURCE, "Google Calendar not authorized")
+    # Google 400s on dateTime without an offset/timeZone; planner proposals and
+    # the UI modal send naive local timestamps — attach the local offset.
+    for key in ("start", "end"):
+        dt_str = (event.get(key) or {}).get("dateTime")
+        if dt_str:
+            event[key]["dateTime"] = _normalize_dt(dt_str)
     created = http_post_json(
         f"{API_BASE}/calendars/{calendar_id}/events",
         json=event,

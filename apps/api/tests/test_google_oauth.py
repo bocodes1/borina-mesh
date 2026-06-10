@@ -120,3 +120,28 @@ def test_oauth_start_fails_without_creds(monkeypatch):
     monkeypatch.delenv("GOOGLE_OAUTH_CLIENT_ID", raising=False)
     r = client.get("/calendar/oauth/start", follow_redirects=False)
     assert r.status_code == 400
+
+
+def test_create_event_normalizes_naive_datetimes(monkeypatch):
+    """Google 400s on offset-less dateTimes; planner proposals send naive local
+    timestamps — create_event must attach the local offset before POSTing."""
+    from integrations import google_calendar
+
+    monkeypatch.setenv("GOOGLE_OAUTH_ACCESS_TOKEN", "tok")
+    sent = {}
+
+    def fake_post(url, *, json=None, headers=None, timeout=None):
+        sent.update(json)
+        return {"id": "evt1"}
+
+    monkeypatch.setattr(google_calendar, "http_post_json", fake_post)
+    res = google_calendar.create_event(
+        {"summary": "x",
+         "start": {"dateTime": "2026-06-10T09:00:00"},
+         "end": {"dateTime": "2026-06-10T10:00:00"}},
+        user_initiated=True,
+    )
+    assert res.connected is True
+    for key in ("start", "end"):
+        v = sent[key]["dateTime"]
+        assert "+" in v or v.endswith("Z") or "-" in v[10:], v  # has an offset
