@@ -53,3 +53,9 @@ def test_list_jobs():
     response = client.get("/jobs")
     assert response.status_code == 200
     assert isinstance(response.json(), list)
+
+
+def test_ping():
+    response = client.get("/ping")
+    assert response.status_code == 200
+    assert response.json() == {"ping": "pong"}

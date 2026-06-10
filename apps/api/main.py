@@ -143,3 +143,8 @@ async def root():
 @app.get("/health")
 async def health():
     return {"status": "ok", "service": "borina-mesh"}
+
+
+@app.get("/ping")
+async def ping():
+    return {"ping": "pong"}
