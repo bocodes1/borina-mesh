@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Optional
@@ -105,10 +106,120 @@ def _build_proposals(day: str) -> list[dict]:
     return proposals
 
 
-def _render_plan_md(day: str, proposals: list[dict]) -> str:
+# ── live agent path (Phase 4 §2) ─────────────────────────────────────────────
+# The planner agent only ever produces TEXT (a JSON proposal list) that is
+# staged as PlanItem rows — the no-autonomous-write rule is untouched: the only
+# write path remains approve_item, invoked by Bo.
+
+PLANNER_TASK_PROMPT = """<task name="daily_plan">
+You are Bo's chief-of-staff planner. Draft today's ({day}) plan as STAGED PROPOSALS.
+You never write to the calendar or task list — you only propose; Bo approves each item.
+
+Context:
+- Calendar events today: {events}
+- Open tasks: {tasks}
+- Brief TL;DR: {tldr}
+- Brief focus suggestions: {tasks_focus}
+
+Propose at most 8 items: a 15-min prep buffer before each real meeting, one protected
+deep-work focus block, and the 2-4 highest-leverage tasks for today. Be specific to the
+context above; no generic filler.
+
+Output ONLY a JSON array (no prose, no code fences). Each element:
+  {{"kind": "task" | "calendar", "title": "...", "rationale": "...", "payload": {{...}}}}
+- kind=calendar payload: {{"summary": "...", "start": "ISO-8601", "end": "ISO-8601"}}
+- kind=task payload: {{"title": "...", "tag": "work|personal|borina", "priority": "high|medium|low"}}
+</task>"""
+
+
+async def _call_agent(prompt: str) -> str:
+    from agents.runner_v2 import run_agent_task
+
+    result = await run_agent_task("planner", prompt)
+    return getattr(result, "output", None) or ""
+
+
+def _parse_agent_proposals(text: str) -> Optional[list[dict]]:
+    """Strict-ish parse of the agent's JSON proposal list. Invalid items are
+    dropped; returns None unless at least one valid proposal survives."""
+    if not text:
+        return None
+    m = re.search(r"\[.*\]", text, re.DOTALL)
+    if not m:
+        return None
+    try:
+        raw = json.loads(m.group(0))
+    except Exception:
+        return None
+    if not isinstance(raw, list):
+        return None
+    valid: list[dict] = []
+    for it in raw[:12]:
+        if not isinstance(it, dict):
+            continue
+        kind = it.get("kind")
+        title = str(it.get("title") or "").strip()[:80]
+        if kind not in ("task", "calendar") or not title:
+            continue
+        payload = it.get("payload") if isinstance(it.get("payload"), dict) else {}
+        if kind == "calendar":
+            if not all(
+                isinstance(payload.get(k), str) and payload.get(k)
+                for k in ("summary", "start", "end")
+            ):
+                continue
+        else:
+            payload = {
+                "title": str(payload.get("title") or title)[:80],
+                "tag": payload.get("tag", "borina"),
+                "priority": payload.get("priority", "medium"),
+            }
+        valid.append({
+            "kind": kind,
+            "title": title,
+            "rationale": str(it.get("rationale") or "")[:200],
+            "payload": payload,
+        })
+    return valid[:8] or None
+
+
+def _agent_context(day: str) -> dict:
+    """Read-only context strings for the planner prompt."""
+    from integrations import google_calendar
+    from daily_brief import sections_for
+
+    cal = google_calendar.list_events(f"{day}T00:00:00Z", f"{day}T23:59:59Z")
+    events = cal.data if cal.connected else []
+    with session_scope() as s:
+        open_tasks = s.exec(select(Task).where(Task.done == False)).all()  # noqa: E712
+    brief = sections_for(day, ["tldr", "tasks_focus"])
+    return {
+        "day": day,
+        "events": json.dumps(
+            [{"title": e.get("title"), "start": e.get("start"), "end": e.get("end")} for e in events]
+        ) if events else "none connected",
+        "tasks": json.dumps(
+            [{"title": t.title, "tag": t.tag, "due": t.due.isoformat() if t.due else None} for t in open_tasks]
+        ) if open_tasks else "none",
+        "tldr": brief.get("tldr") or "no brief yet",
+        "tasks_focus": brief.get("tasks_focus") or "none",
+    }
+
+
+async def _run_agent_proposals(day: str) -> Optional[list[dict]]:
+    try:
+        prompt = PLANNER_TASK_PROMPT.format(**_agent_context(day))
+        return _parse_agent_proposals(await _call_agent(prompt))
+    except Exception as exc:  # noqa: BLE001
+        print(f"[planner] agent path failed, using heuristics: {exc}")
+        return None
+
+
+def _render_plan_md(day: str, proposals: list[dict], source: str = "fallback") -> str:
     tasks = [p for p in proposals if p["kind"] == "task"]
     cals = [p for p in proposals if p["kind"] == "calendar"]
-    lines = [f"# Daily plan — {day}", "", "## Tasks"]
+    origin = "Proposed live by the planner agent." if source == "agent" else "Proposed by fallback heuristics (no LLM)."
+    lines = [f"# Daily plan — {day}", "", f"_{origin}_", "", "## Tasks"]
     lines += [f"- {t['title']}" for t in tasks] or ["- (none)"]
     lines += ["", "## Proposed calendar changes (require approval)"]
     lines += [f"- {c['title']} — {c['rationale']}" for c in cals] or ["- (none)"]
@@ -116,7 +227,11 @@ def _render_plan_md(day: str, proposals: list[dict]) -> str:
     return "\n".join(lines) + "\n"
 
 
-def generate_plan(day: Optional[str] = None) -> dict:
+def generate_plan(
+    day: Optional[str] = None,
+    proposals: Optional[list[dict]] = None,
+    source: str = "fallback",
+) -> dict:
     """Build today's proposal. Clears prior *proposed* items for the day (keeps
     approved/rejected history), creates fresh PlanItems, writes daily-plan.md.
     Never touches the calendar."""
@@ -127,7 +242,8 @@ def generate_plan(day: Optional[str] = None) -> dict:
             s.delete(it)
         s.commit()
 
-    proposals = _build_proposals(day)
+    if proposals is None:
+        proposals = _build_proposals(day)
 
     created_ids: list[int] = []
     with session_scope() as s:
@@ -143,15 +259,26 @@ def generate_plan(day: Optional[str] = None) -> dict:
 
     path = _plan_path(day)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(_render_plan_md(day, proposals))
+    path.write_text(_render_plan_md(day, proposals, source))
 
     return {
         "day": day,
+        "source": source,
         "item_ids": created_ids,
         "task_count": sum(1 for p in proposals if p["kind"] == "task"),
         "calendar_count": sum(1 for p in proposals if p["kind"] == "calendar"),
         "path": str(path),
     }
+
+
+async def generate_plan_with_agent(day: Optional[str] = None) -> dict:
+    """Live path: have the planner agent draft the proposals; fall back to the
+    deterministic heuristics. Staging-only either way — no calendar writes."""
+    day = day or today_str()
+    agent_proposals = await _run_agent_proposals(day)
+    if agent_proposals:
+        return generate_plan(day, proposals=agent_proposals, source="agent")
+    return generate_plan(day)
 
 
 def get_plan(day: Optional[str] = None) -> dict:

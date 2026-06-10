@@ -176,9 +176,9 @@ class SchedulerService:
         """Generate the daily plan proposal (NEVER writes the calendar) + send a
         terse Telegram digest. Approval happens later via /daily or Telegram."""
         try:
-            from planner import generate_plan, plan_digest_text
-            summary = generate_plan()
-            print(f"[scheduler] planner proposed {summary['task_count']} tasks + {summary['calendar_count']} changes")
+            from planner import generate_plan_with_agent, plan_digest_text
+            summary = await generate_plan_with_agent()
+            print(f"[scheduler] planner ({summary['source']}) proposed {summary['task_count']} tasks + {summary['calendar_count']} changes")
             import os
             chat = os.getenv("TELEGRAM_CHAT_ID", "").strip()
             if chat:

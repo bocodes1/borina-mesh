@@ -67,10 +67,13 @@ def daily_plan():
 
 
 @router.post("/plan/generate", status_code=201)
-def generate_plan_now():
-    """Manually run the planner (writes daily-plan.md + proposals; never the calendar)."""
-    from planner import generate_plan
+async def generate_plan_now(use_agent: bool = Query(True)):
+    """Manually run the planner (writes daily-plan.md + proposals; never the
+    calendar). With use_agent=false, uses the deterministic heuristics only."""
+    from planner import generate_plan, generate_plan_with_agent
 
+    if use_agent:
+        return await generate_plan_with_agent()
     return generate_plan()
 
 

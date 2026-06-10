@@ -40,6 +40,7 @@ AGENT_REGISTRY: dict[str, dict] = {
     "polymarket": {"long_id": "polymarket-intel"},
     "researcher": {"long_id": "researcher"},
     "adset":      {"long_id": "adset-optimizer"},
+    "planner":    {"long_id": "planner"},
     # Finance gets a fixed workdir (not pane-prefixed) so its CLAUDE.md +
     # BRIEF_FORMAT.md specs travel with the agent rather than per pane.
     "finance":    {
@@ -80,7 +81,11 @@ class AgentRunResult:
 
 _BOX_LINE_RE = re.compile(r"^[\s│╭╮╯╰─━┃┏┓┗┛┣┫┳┻╋─-▟]+$")
 _PROMPT_BOX_RE = re.compile(r"^[\s│]*>\s*$")
-_HINT_LINE_RE = re.compile(r"\b(esc to interrupt|tokens?\b|context left|^\s*\?\s+for shortcuts)", re.IGNORECASE)
+_HINT_LINE_RE = re.compile(r"\b(esc to interrupt|tokens?\b|context left|ctrl\+o to expand|^\s*\?\s+for shortcuts)", re.IGNORECASE)
+# Post-response TUI chrome: timing line, feedback prompt, input caret, mode bar.
+_RESPONSE_CHROME_RE = re.compile(
+    r"^\s*(✻ Worked for\b|● How is Claude doing\b|⏵⏵|❯\s*$|\d+:\s*(Bad|Fine|Good|Dismiss)\b)"
+)
 
 _TRUST_DIALOG_MARKERS = (
     "trust this folder",
@@ -131,6 +136,8 @@ def _strip_ui_chrome(text: str) -> str:
             continue
         if _HINT_LINE_RE.search(ln):
             continue
+        if _RESPONSE_CHROME_RE.match(ln):
+            continue
         out.append(ln)
     return "\n".join(out)
 
@@ -145,13 +152,15 @@ def _delta_after_prompt(before: str, after: str, prompt: str) -> str:
         delta = after[len(before):]
     else:
         delta = after
-    # If the prompt appears verbatim in the delta, drop everything up to and
-    # including its first line — the response follows.
-    first_prompt_line = prompt.strip().splitlines()[0] if prompt.strip() else ""
-    if first_prompt_line and first_prompt_line in delta:
-        idx = delta.find(first_prompt_line)
-        # Move past the line containing the echoed prompt.
-        nl = delta.find("\n", idx)
+    # If the prompt was echoed back, drop the WHOLE echoed block: cut after the
+    # prompt's last line when findable (the TUI indents but keeps line breaks),
+    # else after the first line as before.
+    prompt_lines = [l.strip() for l in prompt.strip().splitlines() if l.strip()]
+    if prompt_lines and prompt_lines[0] in delta:
+        idx = delta.find(prompt_lines[0])
+        end = delta.find(prompt_lines[-1], idx)
+        cut = end if end != -1 else idx
+        nl = delta.find("\n", cut)
         if nl != -1:
             delta = delta[nl + 1:]
     return delta

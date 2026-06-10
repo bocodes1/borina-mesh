@@ -338,3 +338,26 @@ agent absent.
   `borina-mesh-apps/`, `scorecards/`, `apps/api/main.py.conflict.bak`, `apps/web/tsconfig.tsbuildinfo`.
 - `.gitignore`: added `reports/` (runtime briefs/PDFs), `*.tsbuildinfo`, `.worktrees/`.
 - Committed `scripts/auto-update.sh` — launchd (`com.borina.mesh-updater`) runs it; it was untracked.
+
+## Step 2: Live LLM-orchestrated brief + planner ✅
+- **Diagnosed prod bug:** the 6am brief artifact was the raw tmux pane capture — echoed prompt
+  (which itself contains `<section>` tags, so `parse_brief` validated it), the agent's file dump,
+  and TUI chrome. The researcher agent had meanwhile saved a CLEAN brief inside its own workdir.
+- **Brief (schedule_daily.py):** live path now reads the agent-workdir file (`_agent_brief_file`)
+  first — file handoff beats pane scraping; `_validate_brief` rejects prompt echoes (section bodies
+  compared against the prompt's instruction bodies) and coerces `## Heading`-styled briefs to the
+  canonical `<section>` format (`daily_brief.coerce_headings_to_sections`). `{today}` now resolved
+  into the prompt.
+- **Runner (runner_v2.py):** `_delta_after_prompt` strips the WHOLE echoed prompt block (was: first
+  line only); `_strip_ui_chrome` drops post-response chrome (✻ Worked for, feedback prompt, ⏵⏵ mode
+  bar, ctrl+o hints). Registered `planner` in AGENT_REGISTRY.
+- **Planner (planner.py):** new live path `generate_plan_with_agent` — planner agent gets read-only
+  context (events, open tasks, brief tldr/focus), returns a strict JSON proposal array,
+  `_parse_agent_proposals` validates/caps items, falls back to the deterministic heuristics on any
+  failure. Scheduler + `POST /daily/plan/generate` (`use_agent` param) use it. daily-plan.md notes
+  provenance (agent vs fallback). **No-autonomous-write rule unchanged** — the agent only produces
+  text staged as proposed PlanItems; the sole write path is still user-approve.
+- **Tests** `test_live_llm.py` (11): tagged-brief accept, prompt-echo reject, heading coercion,
+  workdir-file handoff, echo→fallback, full-echo delta strip, chrome strip, JSON parse (fences),
+  garbage/invalid-item rejection, agent-proposals staged with zero calendar writes, garbage→fallback.
+  Backend **187** green.

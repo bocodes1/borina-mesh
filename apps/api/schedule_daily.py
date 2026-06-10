@@ -19,7 +19,7 @@ from datetime import date
 from pathlib import Path
 from typing import Optional
 
-from daily_brief import SECTION_IDS, save_brief, parse_brief
+from daily_brief import SECTION_IDS, save_brief, parse_brief, coerce_headings_to_sections
 from models import Task
 
 # The canonical scheduled task body (stored verbatim from the spec). Routed to a
@@ -172,28 +172,81 @@ def build_fallback_brief(day: Optional[str] = None) -> str:
     return header + "\n\n" + "\n\n".join(_section(sid, bodies[sid]) for sid in SECTION_IDS)
 
 
-async def _run_agent_brief() -> Optional[str]:
-    """Live path: dispatch a researcher-class agent with the task prompt.
-    Returns markdown if it produced a sectioned brief, else None."""
-    try:
-        from agents.runner_v2 import run_agent_task
+# The task prompt itself contains <section> tags (as format instructions), so a
+# TUI prompt-echo parses as a "valid" brief. Compare section bodies against the
+# prompt's instruction bodies to reject echoes (bit us in prod on 2026-06-09).
+_PROMPT_SECTIONS = parse_brief(DAILY_BRIEF_TASK_PROMPT)
 
-        result = await run_agent_task("researcher", DAILY_BRIEF_TASK_PROMPT)
-        output = getattr(result, "output", None) or ""
-        # Only accept it if it actually returned the sectioned format.
-        if parse_brief(output):
-            return output
+
+def _is_prompt_echo(parsed: dict[str, str]) -> bool:
+    return any(
+        parsed.get(sid, "").strip() == body.strip()
+        for sid, body in _PROMPT_SECTIONS.items()
+        if parsed.get(sid)
+    )
+
+
+def _validate_brief(markdown: Optional[str]) -> Optional[str]:
+    """Accept only a real sectioned brief: tldr + ≥5 sections, not a prompt
+    echo. A `## Heading`-styled brief is coerced to the canonical format."""
+    if not markdown or not markdown.strip():
+        return None
+    parsed = parse_brief(markdown)
+    if "tldr" in parsed and len(parsed) >= 5 and not _is_prompt_echo(parsed):
+        return markdown
+    coerced = coerce_headings_to_sections(markdown)
+    if coerced:
+        parsed = parse_brief(coerced)
+        if "tldr" in parsed and len(parsed) >= 5 and not _is_prompt_echo(parsed):
+            return coerced
+    return None
+
+
+def _agent_brief_file(day: str) -> Path:
+    """Where the researcher agent saves the brief inside its own workdir (the
+    prompt instructs it to). Reading this file beats scraping the tmux pane."""
+    from agents.runner_v2 import AGENT_REGISTRY, _workdir_root
+
+    entry = AGENT_REGISTRY.get("researcher", {})
+    workdir = Path(entry.get("workdir") or (_workdir_root() / "researcher"))
+    return workdir / "reports" / day / "daily-brief.md"
+
+
+async def _call_agent(prompt: str) -> str:
+    from agents.runner_v2 import run_agent_task
+
+    result = await run_agent_task("researcher", prompt)
+    return getattr(result, "output", None) or ""
+
+
+async def _run_agent_brief(day: str) -> Optional[str]:
+    """Live path: dispatch a researcher-class agent with the task prompt.
+    Returns validated markdown, else None (caller falls back)."""
+    try:
+        output = await _call_agent(DAILY_BRIEF_TASK_PROMPT.replace("{today}", day))
     except Exception as exc:  # noqa: BLE001
         print(f"[schedule_daily] agent path failed, using fallback: {exc}")
-    return None
+        return None
+    # Preferred handoff: the file the agent wrote (pane capture is lossy —
+    # echoed prompt, wrapped lines, TUI chrome).
+    try:
+        f = _agent_brief_file(day)
+        if f.exists():
+            valid = _validate_brief(f.read_text())
+            if valid:
+                return valid
+    except Exception as exc:  # noqa: BLE001
+        print(f"[schedule_daily] workdir brief unreadable: {exc}")
+    return _validate_brief(output)
 
 
 async def generate_daily_brief(use_agent: bool = True, day: Optional[str] = None) -> Path:
     """Generate + save today's daily-brief.md. Prefers the live agent, always
     falls back to the deterministic builder so a brief is always written."""
+    day = day or date.today().isoformat()
     markdown: Optional[str] = None
     if use_agent:
-        markdown = await _run_agent_brief()
+        markdown = await _run_agent_brief(day)
     if not markdown:
         markdown = build_fallback_brief(day)
     return save_brief(markdown, day)

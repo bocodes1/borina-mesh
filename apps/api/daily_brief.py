@@ -43,6 +43,42 @@ def parse_brief(markdown: str) -> dict[str, str]:
     return {m.group("id").lower(): m.group("body").strip() for m in _SECTION_RE.finditer(markdown)}
 
 
+# Live agents tend to write `## Heading` markdown instead of <section> tags;
+# map the canonical headings back onto section ids so those briefs still parse.
+_HEADING_TO_SECTION = {
+    "tl;dr": "tldr", "tldr": "tldr",
+    "markets": "markets",
+    "watchlist movers": "watchlist_movers", "watchlist": "watchlist_movers",
+    "trading": "trading",
+    "calendar": "calendar",
+    "tasks & focus": "tasks_focus", "tasks focus": "tasks_focus",
+    "tasks": "tasks_focus", "focus": "tasks_focus",
+    "inbox": "inbox",
+    "nudges": "nudges",
+    "weather & logistics": "weather_logistics", "weather": "weather_logistics",
+    "logistics": "weather_logistics",
+}
+
+
+def coerce_headings_to_sections(markdown: str) -> Optional[str]:
+    """Rewrite a `## Heading`-styled brief into the canonical <section> format.
+    Returns None unless it maps to tldr + at least 4 more known sections."""
+    parts = re.split(r"(?m)^##\s+(.+)$", markdown)
+    if len(parts) < 3:
+        return None
+    sections: dict[str, str] = {}
+    for i in range(1, len(parts) - 1, 2):
+        sid = _HEADING_TO_SECTION.get(parts[i].strip().rstrip(":").lower())
+        if sid and sid not in sections:
+            sections[sid] = parts[i + 1].strip()
+    if "tldr" not in sections or len(sections) < 5:
+        return None
+    preamble = parts[0].strip()
+    out = [preamble] if preamble else []
+    out += [f'<section id="{sid}">\n{sections[sid]}\n</section>' for sid in SECTION_IDS if sid in sections]
+    return "\n\n".join(out)
+
+
 def today_str() -> str:
     return date.today().isoformat()
 
