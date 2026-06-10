@@ -120,6 +120,9 @@ Context:
 - Open tasks: {tasks}
 - Brief TL;DR: {tldr}
 - Brief focus suggestions: {tasks_focus}
+- Bo's recent Obsidian daily notes (his actual current work — prefer FRESH items
+  from the newest note; SKIP long-running items that recur across days, he knows
+  about those already): {obsidian}
 
 Propose at most 8 items: a 15-min prep buffer before each real meeting, one protected
 deep-work focus block, and the 2-4 highest-leverage tasks for today. Be specific to the
@@ -202,6 +205,24 @@ def _parse_agent_proposals(text: str) -> Optional[list[dict]]:
     return valid[:8] or None
 
 
+def _recent_daily_notes(limit: int = 2, max_chars: int = 4000) -> str:
+    """Newest Obsidian daily notes — Bo's actual current work (read-only).
+    Empty-vault/dev/test environments simply get no vault context."""
+    root = os.getenv("OBSIDIAN_VAULT_PATH", "").strip()
+    if not root:
+        return ""
+    daily_dir = Path(root) / "01-daily"
+    if not daily_dir.is_dir():
+        return ""
+    chunks = []
+    for note in sorted(daily_dir.glob("????-??-??.md"), reverse=True)[:limit]:
+        try:
+            chunks.append(f"### {note.stem}\n{note.read_text()}")
+        except OSError:
+            continue
+    return "\n\n".join(chunks)[:max_chars]
+
+
 def _agent_context(day: str) -> dict:
     """Read-only context strings for the planner prompt."""
     from integrations import google_calendar
@@ -222,6 +243,7 @@ def _agent_context(day: str) -> dict:
         ) if open_tasks else "none",
         "tldr": brief.get("tldr") or "no brief yet",
         "tasks_focus": brief.get("tasks_focus") or "none",
+        "obsidian": _recent_daily_notes() or "no vault notes",
     }
 
 

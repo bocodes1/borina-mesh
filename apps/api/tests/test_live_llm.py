@@ -254,3 +254,20 @@ def test_generate_plan_with_agent_falls_back_on_garbage(monkeypatch):
     plan = planner.get_plan()
     assert any(i["title"] == "Focus block (deep work)" for i in plan["items"])
     assert calls == []
+
+
+def test_planner_context_includes_recent_obsidian_dailies(tmp_path, monkeypatch):
+    daily = tmp_path / "01-daily"
+    daily.mkdir(parents=True)
+    (daily / "2026-06-09.md").write_text("# old\n- [ ] stale thing")
+    (daily / "2026-06-10.md").write_text("# today\n- [ ] ship the poller test")
+    monkeypatch.setenv("OBSIDIAN_VAULT_PATH", str(tmp_path))
+    ctx = planner._agent_context("2026-06-10")
+    assert "ship the poller test" in ctx["obsidian"]
+    assert "stale thing" in ctx["obsidian"]  # included, prompt tells agent to down-weight
+
+
+def test_planner_context_no_vault_is_empty(monkeypatch):
+    monkeypatch.setenv("OBSIDIAN_VAULT_PATH", "")
+    ctx = planner._agent_context("2026-06-10")
+    assert ctx["obsidian"] == "no vault notes"

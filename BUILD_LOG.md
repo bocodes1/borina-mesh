@@ -431,3 +431,11 @@ agent absent.
 - Bo consented; token file landed at `~/.borina/google_oauth_token.json` (0600, refresh_token
   present). Live verify: `GET /calendar/events` → `"connected": true`.
 - Remaining Tier-2: approve one planner item in /daily → exactly one event on the real calendar.
+
+## Step 3: Planner reads Obsidian dailies + Bo's daily-task workflow ✅
+- `planner._recent_daily_notes()`: newest 2 vault daily notes (capped 4k chars) join the agent
+  context; prompt tells the agent to prefer FRESH items and skip long-running ones that recur
+  across days. Read-only; empty vault/test env → no vault context. Backend **210** green.
+- Workflow agreed with Bo: daily tasks are PROPOSED from Obsidian + recent context, Bo picks,
+  then added (3 added today via /tasks); never auto-added; stale items excluded; important picks
+  marked in the Obsidian daily note.
