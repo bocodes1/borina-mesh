@@ -89,6 +89,18 @@ def _alias_match(text: str) -> Optional[Intent]:
             confidence=0.95, source="alias",
         )
 
+    # Direct addressing: "<agent>: <task>" / "<agent>, <task>" — Bo picks the
+    # agent explicitly (Telegram fleet control).
+    direct = re.match(
+        r"^\s*(trader|inbox|scout|ceo|polymarket|researcher|adset|finance)\s*[:,]\s+(.+)$",
+        low, re.DOTALL,
+    )
+    if direct:
+        return Intent(
+            raw_text=text, agent=direct.group(1), task_type="direct",
+            confidence=0.95, source="alias",
+        )
+
     # Worked example (spec §8b.3): stocks/investments/portfolio + report/news/verify
     # → researcher + finance_deep_dive.
     finance_subject = re.search(r"\b(stock|stocks|investment|investments|portfolio|holdings|equit)", low)

@@ -13,6 +13,7 @@ agent run. The background worker drains the queue (concurrent, crash-safe). The
 update_id keys idempotency so a retried Telegram update never double-runs.
 """
 import os
+import re
 
 from fastapi import APIRouter, HTTPException, Request
 
@@ -71,6 +72,31 @@ def _handle_plan_callback(data: str, chat_id: int) -> dict:
     return {"ok": True, "status": action, "item_id": item_id}
 
 
+_STATUS_RE = re.compile(r"^\s*(status|agents|fleet)\s*\??\s*$", re.IGNORECASE)
+
+
+def _fleet_status_text() -> str:
+    """One line per agent: state + cleaned current task (Telegram 'status')."""
+    from agents.base import registry
+    from agent_status import get_agent_status
+    from db import engine
+
+    def _clean(p: str) -> str:
+        p = re.sub(r"^\[scheduled\]\s*", "", p or "")
+        return re.sub(r"\s*\b(Current time|Now):.*$", "", p).strip()
+
+    lines = []
+    running = 0
+    for a in registry.list():
+        info = get_agent_status(a.id, engine)
+        if info.get("status") == "running":
+            running += 1
+            lines.append(f"{a.id}: running - {_clean(info.get('current_task'))[:60]}")
+        else:
+            lines.append(f"{a.id}: idle")
+    return "\n".join([f"{running} running / {len(lines)} agents"] + sorted(lines))
+
+
 @router.post("/webhook")
 async def webhook(request: Request):
     # 1. Secret-token header — hard reject (this is the security boundary).
@@ -119,6 +145,15 @@ def process_update(update: dict) -> dict:
             return {"ok": True, "status": "transcribe_failed"}
         text = transcript
         heard = f'Heard: "{transcript[:160]}". '
+
+    # 2b2. Fleet status command — answered inline, nothing dispatched.
+    if _STATUS_RE.match(text):
+        status_text = _fleet_status_text()
+        dispatcher.send_telegram_message(
+            chat_id,
+            format_telegram(status_text, max_lines=status_text.count("\n") + 2),
+        )
+        return {"ok": True, "status": "status"}
 
     # 2c. Thread follow-up: replying to a bot report continues that topic with
     # the same agent. Forbidden gate still applies to the follow-up text.
