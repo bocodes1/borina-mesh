@@ -103,13 +103,30 @@ def process_update(update: dict) -> dict:
         print(f"[telegram] ignored update from chat_id={chat_id}")
         return {"ok": True, "status": "ignored"}
 
+    # 2b. Voice/audio → local Whisper transcript, routed exactly like text.
+    # Deliberately AFTER the allow-list: media from non-allowed senders is
+    # never downloaded.
+    heard = ""
+    media = msg.get("voice") or msg.get("audio")
+    if not text and media:
+        from dispatch.voice import transcribe_telegram_media
+
+        transcript = transcribe_telegram_media(media)
+        if not transcript:
+            dispatcher.send_telegram_message(
+                chat_id, format_telegram("Could not transcribe that audio - try typing it.")
+            )
+            return {"ok": True, "status": "transcribe_failed"}
+        text = transcript
+        heard = f'Heard: "{transcript[:160]}". '
+
     # 3. Intent.
     intent = resolve_intent(text)
     if intent.forbidden:
         dispatcher.send_telegram_message(
             chat_id,
             format_telegram(
-                f"That maps to a {intent.forbidden_reason} action - not auto-dispatchable. "
+                f"{heard}That maps to a {intent.forbidden_reason} action - not auto-dispatchable. "
                 f"I only run read-only research and intel from Telegram."
             ),
         )
@@ -117,7 +134,7 @@ def process_update(update: dict) -> dict:
 
     if not intent.dispatchable:
         dispatcher.send_telegram_message(
-            chat_id, format_telegram("I could not confidently route that - could you rephrase?")
+            chat_id, format_telegram(f"{heard}I could not confidently route that - could you rephrase?")
         )
         return {"ok": True, "status": "clarify"}
 
@@ -128,6 +145,6 @@ def process_update(update: dict) -> dict:
 
     dispatcher.send_telegram_message(
         chat_id,
-        format_telegram(f"On it - dispatching {intent.agent}. I will send the report when it is ready."),
+        format_telegram(f"{heard}On it - dispatching {intent.agent}. I will send the report when it is ready."),
     )
     return {"ok": True, "status": "dispatched", "agent": intent.agent, "job_id": job.id}

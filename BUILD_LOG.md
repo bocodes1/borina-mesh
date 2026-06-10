@@ -439,3 +439,14 @@ agent absent.
 - Workflow agreed with Bo: daily tasks are PROPOSED from Obsidian + recent context, Bo picks,
   then added (3 added today via /tasks); never auto-added; stale items excluded; important picks
   marked in the Obsidian daily note.
+
+## Step 4: Telegram voice messages → routed like text ✅
+- `dispatch/voice.py`: local Whisper via faster-whisper (CPU int8 on the M4, no cloud API, model
+  env TELEGRAM_VOICE_MODEL default "base", HF-cached on first use). Telegram getFile download →
+  transcribe → transcript enters the SAME intent/dispatch pipeline; replies prefix `Heard: "…"`.
+- Security: transcription happens only AFTER the allow-list check (media from non-allowed
+  senders is never downloaded); 180s/20MB caps enforced pre-download; every failure fails closed
+  ("try typing it").
+- **Tests** `test_telegram_voice.py` (5): transcript routes like text, non-allowed never touches
+  media, transcribe-failure fails closed, caps block pre-download, no-token no-download.
+  Backend **215** green.
