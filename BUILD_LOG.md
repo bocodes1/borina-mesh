@@ -460,3 +460,24 @@ agent absent.
   message as prompt. The forbidden-action gate still runs FIRST and still refuses. Backend **216**.
 - Also confirmed the 409 getUpdates errors are restart bursts (old long-poll lingering a few
   seconds server-side), not a second consumer — steady state is clean.
+
+# Phase 6 — 2026-06-10 (Telegram autonomy: plan docs/superpowers/plans/2026-06-10-telegram-autonomy-features.md)
+
+## §A Obsidian write-back ✅
+- `dispatch/vault_writeback.py`: every completed dispatch → frontmattered report in
+  `04-resources/reports/{day}-{agent}-job{id}.md` + link under "## Mesh outputs" in the daily note
+  (note/section created if missing). No-op without a vault; never raises. Hooked after
+  `_complete_job` in the dispatcher. Tests (6).
+## §B Telegram threads ✅
+- Worker honors `job.agent_id` over prompt re-resolution (prereq — follow-ups must reach the
+  thread's agent, not the researcher fallback).
+- `TelegramThread` table; `send_telegram_message` returns message_id; every report reply recorded.
+- `process_update`: replying to a bot report routes the follow-up to the SAME agent (tmux session
+  context intact), forbidden gate still first. Tests (5 + worker test).
+## §C Missions ✅
+- `mission:` alias → ceo/mission (checked before single-agent aliases; forbidden gate still wins).
+- `dispatch/mission.py`: CEO decompose (strict JSON, pane-wrap repair) → ≤4 read-only agents in
+  parallel → CEO synthesis; decompose failure → single researcher; synthesis failure → section
+  join. Dispatcher branches on task_type=mission with a "Mission: N agents dispatched" progress
+  ping. Tests (9).
+- Backend **237** green.
