@@ -77,9 +77,12 @@ describe("/calendar tab — 3 states", () => {
   });
 
   it("data renders an event", async () => {
+    // Event must fall in the calendar's default view (the current week).
+    const start = new Date(); start.setHours(9, 0, 0, 0);
+    const end = new Date(); end.setHours(9, 15, 0, 0);
     vi.mocked(api.getCalendarEvents).mockResolvedValue({
       calendar: { source: "google_calendar", connected: true, error: null, data: null },
-      events: [{ id: "e1", title: "Standup", start: "2026-06-02T09:00:00Z", end: "2026-06-02T09:15:00Z" }],
+      events: [{ id: "e1", title: "Standup", start: start.toISOString(), end: end.toISOString() }],
       task_chips: [],
     } as never);
     const { container } = render(<CalendarPage />);
