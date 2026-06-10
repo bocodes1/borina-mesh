@@ -422,3 +422,12 @@ agent absent.
   redirect, callback exchange + state validation (+ bad-state 400), start without creds 400.
   Backend **207** green.
 - Bo's borinamesh client id/secret live in `apps/api/.env` only (gitignored).
+
+## Step 2: Google consent completed live ✅
+- Console (driven via Playwright with Bo's session): redirect URI saved, Calendar API confirmed
+  enabled, **OAuth app published Testing → In production** (test-user gate + 7-day refresh-token
+  expiry were the consent blockers; also added prompt=select_account after the browser auto-picked
+  the wrong signed-in account).
+- Bo consented; token file landed at `~/.borina/google_oauth_token.json` (0600, refresh_token
+  present). Live verify: `GET /calendar/events` → `"connected": true`.
+- Remaining Tier-2: approve one planner item in /daily → exactly one event on the real calendar.
