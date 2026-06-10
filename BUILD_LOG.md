@@ -499,3 +499,14 @@ agent absent.
 - The generic forbidden gate deliberately doesn't apply to build texts (a code task saying
   "remove X" isn't a live deletion); builds gate on independent verification instead.
 - Tests `test_telegram_status.py` (5) + `test_builder.py` (11). Backend **253** green.
+
+## Phase 6 — live verification ✅
+- **Dispatch + write-back + thread (job 1921):** real researcher dispatch through the production
+  worker → COMPLETED, reply + PDF to Bo, TelegramThread recorded, vault report
+  `04-resources/reports/2026-06-10-researcher-job1921.md` + daily-note link written.
+- **Autonomous builder (job 1923):** `build: add a GET /ping endpoint…` via the real
+  process_update path → headless claude implemented endpoint + wrote its own pytest test
+  (~95s) → independent verification → merged `dfab73f` → kickstart → health OK → pushed →
+  worktree cleaned → ship report to Bo. `GET /ping` → `{"ping":"pong"}` live.
+  **~2.5 minutes message-to-shipped, zero human input.**
+- Post-merge main: backend **254** (builder's test included), frontend **65**, tsc clean.
