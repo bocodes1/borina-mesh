@@ -56,3 +56,26 @@ def test_never_raises(monkeypatch, tmp_path):
     f.write_text("x")
     monkeypatch.setenv("OBSIDIAN_VAULT_PATH", str(f))
     assert save_dispatch_to_vault("a", "b", "# c", "2026-06-10", 1) is None
+
+
+def test_dispatcher_calls_writeback(monkeypatch, tmp_path):
+    """_produce_and_reply persists to the vault after completing the job."""
+    from dispatch import dispatcher
+    from dispatch.intent import Intent
+
+    monkeypatch.setenv("OBSIDIAN_VAULT_PATH", str(tmp_path))
+
+    async def fake_run_agent(agent_id, prompt):
+        return "# report\n\nbody"
+
+    monkeypatch.setattr(dispatcher, "run_agent", fake_run_agent)
+    monkeypatch.setattr(dispatcher, "render_markdown_pdf", lambda md, p: p)
+    monkeypatch.setattr(dispatcher, "send_telegram_message", lambda *a, **k: None)
+    monkeypatch.setattr(dispatcher, "send_telegram_document", lambda *a, **k: None)
+
+    intent = Intent(raw_text="what moved", agent="researcher",
+                    task_type="general_question", confidence=0.5, source="fallback")
+    asyncio.run(dispatcher.dispatch_intent(intent, chat_id=6452258223))
+    reports = list((tmp_path / "04-resources" / "reports").glob("*.md"))
+    assert len(reports) == 1
+    assert "body" in reports[0].read_text()

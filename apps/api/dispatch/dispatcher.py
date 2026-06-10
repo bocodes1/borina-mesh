@@ -136,6 +136,11 @@ async def _produce_and_reply(intent: Intent, chat_id: int, job_id: int, requeste
     write_artifact_meta(day, name, meta)
     _complete_job(job_id, markdown)
 
+    # Persist what we learned into the Obsidian vault (no-op without a vault;
+    # never raises) so briefs/planner/agents can reuse it.
+    from dispatch.vault_writeback import save_dispatch_to_vault
+    save_dispatch_to_vault(intent.agent, intent.raw_text, markdown, day, job_id)
+
     deep_link = f"http://{_public_host()}/artifacts?id={day}/{name}"
     # Outbound reply goes through the formatter so it's short, emoji-free, clean.
     from dispatch.telegram_format import format_dispatch_reply
