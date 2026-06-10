@@ -90,3 +90,15 @@ class Task(SQLModel, table=True):
     done: bool = Field(default=False, index=True)
     sort_order: int = Field(default=0)
     created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
+
+
+class TelegramThread(SQLModel, table=True):
+    """Maps a bot-sent Telegram message to the job/agent that produced it, so
+    a user reply to that message continues the topic with the same agent."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    chat_id: int = Field(index=True)
+    message_id: int = Field(index=True)
+    agent_id: str
+    job_id: Optional[int] = None
+    prompt: str = ""
+    created_at: datetime = Field(default_factory=datetime.utcnow)

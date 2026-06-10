@@ -44,13 +44,15 @@ def render_markdown_pdf(markdown: str, out_path: Path) -> Path:
     return out_path
 
 
-def send_telegram_message(chat_id: int, text: str) -> None:
+def send_telegram_message(chat_id: int, text: str) -> Optional[int]:
+    """Send; returns Telegram's message_id (None offline/on failure) so the
+    reply can be recorded as a thread anchor."""
     from integrations.base import http_post_json
 
     token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
     if not token:
-        return
-    http_post_json(
+        return None
+    resp = http_post_json(
         f"https://api.telegram.org/bot{token}/sendMessage",
         json={
             "chat_id": chat_id,
@@ -59,6 +61,10 @@ def send_telegram_message(chat_id: int, text: str) -> None:
             "disable_web_page_preview": True,
         },
     )
+    try:
+        return int((resp.get("result") or {}).get("message_id"))
+    except Exception:  # noqa: BLE001
+        return None
 
 
 def send_telegram_document(chat_id: int, file_path: Path, caption: str) -> None:
@@ -148,7 +154,8 @@ async def _produce_and_reply(intent: Intent, chat_id: int, job_id: int, requeste
     text = format_dispatch_reply(
         agent=intent.agent, markdown=markdown, deep_link=deep_link
     )
-    send_telegram_message(chat_id, text)
+    sent_id = send_telegram_message(chat_id, text)
+    _record_thread(chat_id, sent_id, intent.agent, job_id, intent.raw_text)
     send_telegram_document(chat_id, pdf_path, caption=f"{intent.agent} report")
 
     return {
@@ -175,6 +182,34 @@ def _summarize(markdown: str) -> str:
     lines = [l.strip() for l in markdown.splitlines() if l.strip() and not l.lstrip().startswith("#")]
     preview = " ".join(lines[:3])
     return (preview[:280] + "…") if len(preview) > 280 else (preview or "Report ready.")
+
+
+def _record_thread(chat_id: int, message_id: Optional[int], agent_id: str,
+                   job_id: int, prompt: str) -> None:
+    """Anchor the bot's report message so a user reply continues this topic."""
+    if not message_id:
+        return
+    from db import session_scope
+    from models import TelegramThread
+
+    with session_scope() as s:
+        s.add(TelegramThread(chat_id=chat_id, message_id=message_id,
+                             agent_id=agent_id, job_id=job_id, prompt=prompt[:300]))
+        s.commit()
+
+
+def find_thread(chat_id: int, message_id: int):
+    from db import session_scope
+    from models import TelegramThread
+    from sqlmodel import select
+
+    with session_scope() as s:
+        return s.exec(
+            select(TelegramThread).where(
+                TelegramThread.chat_id == chat_id,
+                TelegramThread.message_id == message_id,
+            )
+        ).first()
 
 
 def _create_job(intent: Intent) -> int:
