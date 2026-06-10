@@ -5,6 +5,7 @@ import asyncio
 
 import pytest
 
+import models  # noqa: F401 — register tables before conftest's init_db runs
 from dispatch.vault_writeback import save_dispatch_to_vault
 
 
