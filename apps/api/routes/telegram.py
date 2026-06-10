@@ -120,6 +120,34 @@ def process_update(update: dict) -> dict:
         text = transcript
         heard = f'Heard: "{transcript[:160]}". '
 
+    # 2c. Thread follow-up: replying to a bot report continues that topic with
+    # the same agent. Forbidden gate still applies to the follow-up text.
+    reply_to = (msg.get("reply_to_message") or {}).get("message_id")
+    if reply_to:
+        thread = dispatcher.find_thread(chat_id, reply_to)
+        if thread:
+            from dispatch.intent import detect_forbidden
+
+            reason = detect_forbidden(text)
+            if reason:
+                dispatcher.send_telegram_message(
+                    chat_id,
+                    format_telegram(
+                        f"{heard}That maps to a {reason} action - not auto-dispatchable. "
+                        f"I only run read-only research and intel from Telegram."
+                    ),
+                )
+                return {"ok": True, "status": "refused", "reason": reason}
+            follow_up = f"Follow-up to your earlier report on '{thread.prompt}': {text}"
+            job = enqueue_job(follow_up, thread.agent_id, update_id, chat_id)
+            if job is None:
+                return {"ok": True, "status": "duplicate"}
+            dispatcher.send_telegram_message(
+                chat_id,
+                format_telegram(f"{heard}Following up with {thread.agent_id}."),
+            )
+            return {"ok": True, "status": "dispatched", "agent": thread.agent_id, "job_id": job.id}
+
     # 3. Intent.
     intent = resolve_intent(text)
     if intent.forbidden:
