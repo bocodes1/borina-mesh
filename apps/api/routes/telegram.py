@@ -73,6 +73,8 @@ def _handle_plan_callback(data: str, chat_id: int) -> dict:
 
 
 _STATUS_RE = re.compile(r"^\s*(status|agents|fleet)\s*\??\s*$", re.IGNORECASE)
+_REMEMBER_RE = re.compile(r"^\s*remember\s*[:,]\s+(.+)$", re.IGNORECASE | re.DOTALL)
+_RECALL_RE = re.compile(r"^\s*(?:recall|what do you know about)\s*[:,]?\s+(.+)$", re.IGNORECASE | re.DOTALL)
 # "build: task" / "ship: task" / "builder: task" → self-build (this mesh).
 # "build <repo>: task" → external GitHub project. repo is one token before the colon.
 _BUILD_RE = re.compile(
@@ -185,6 +187,22 @@ def process_update(update: dict) -> dict:
             ),
         )
         return {"ok": True, "status": "build_started", "job_id": job_id}
+
+    # 2b3. Brain commands — the machine's Obsidian memory, answered inline.
+    rm = _REMEMBER_RE.match(text)
+    if rm:
+        from dispatch.vault_brain import remember
+
+        remember(rm.group(1).strip(), source="telegram")
+        dispatcher.send_telegram_message(chat_id, format_telegram(f"{heard}Noted - I will remember that."))
+        return {"ok": True, "status": "remembered"}
+    rc = _RECALL_RE.match(text)
+    if rc:
+        from dispatch.vault_brain import recall
+
+        ctx = recall(rc.group(1).strip()) or "Nothing in the brain on that yet."
+        dispatcher.send_telegram_message(chat_id, format_telegram(ctx, max_lines=20))
+        return {"ok": True, "status": "recalled"}
 
     # 2b2. Fleet status command — answered inline, nothing dispatched.
     if _STATUS_RE.match(text):

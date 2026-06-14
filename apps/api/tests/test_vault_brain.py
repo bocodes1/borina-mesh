@@ -66,3 +66,32 @@ def test_recall_includes_remembered_facts(vault):
     vault_brain.remember("The polymarket bot uses a CEX-lag strategy on Binance")
     ctx = vault_brain.recall("how does the polymarket bot work")
     assert "CEX-lag" in ctx
+
+
+# ── Telegram brain commands ──────────────────────────────────────────────────
+
+def test_remember_command(monkeypatch, vault):
+    import routes.telegram as tg
+    from dispatch import dispatcher
+    monkeypatch.setenv("TELEGRAM_ALLOWED_CHAT_IDS", "6452258223")
+    sent = []
+    monkeypatch.setattr(dispatcher, "send_telegram_message", lambda cid, txt: sent.append(txt) or 1)
+    res = tg.process_update({"update_id": 9301, "message": {"chat": {"id": 6452258223},
+                             "text": "remember: my main repo is coordlayer"}})
+    assert res["status"] == "remembered"
+    text = (vault / "04-resources" / "brain" / "memory.md").read_text()
+    assert "my main repo is coordlayer" in text
+
+
+def test_recall_command(monkeypatch, vault):
+    import routes.telegram as tg
+    from dispatch import dispatcher
+    monkeypatch.setenv("TELEGRAM_ALLOWED_CHAT_IDS", "6452258223")
+    vault_brain.remember("the bot uses a CEX-lag strategy")
+    sent = []
+    monkeypatch.setattr(dispatcher, "send_telegram_message", lambda cid, txt: sent.append(txt) or 1)
+    res = tg.process_update({"update_id": 9302, "message": {"chat": {"id": 6452258223},
+                             "text": "recall: how does the bot work"}})
+    assert res["status"] == "recalled"
+    # MarkdownV2 escapes the hyphen, so match the unescaped stem.
+    assert any("CEX" in s and "lag" in s for s in sent)
