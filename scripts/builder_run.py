@@ -158,6 +158,93 @@ def ship(job_id, chat_id, task, branch, wt, test_summary) -> None:
     log(f"shipped {sha}")
 
 
+EXTERNAL_PROMPT = """You are the Borina builder working in a fresh clone of an EXTERNAL project
+at {workdir} (on branch {branch}). Touch only this clone — nothing else on the machine.
+
+Task from Bo (via Telegram): {task}
+{guidance}
+Rules:
+- First explore the repo (README, package manifest, existing tests) to match its conventions.
+- Implement the task surgically and idiomatically for THIS project.
+- If the project has tests, run them and make them pass. If not, sanity-check your work
+  (build/lint/run as appropriate).
+- Commit your changes on the current branch with a clear message. Do NOT push — the shipper
+  pushes and opens a PR after you finish.
+- If blocked on a real product decision or you cannot make it work, write BLOCKED.md at the
+  repo root with ONE specific question and stop."""
+
+
+def claude_run(prompt, cwd, job_id, chat_id):
+    from agents.tmux_supervisor import _resolve_claude
+    claude = _resolve_claude()
+    log(f"running headless claude on job {job_id} in {cwd}...")
+    try:
+        r = run([claude, "-p", prompt, "--dangerously-skip-permissions"],
+                cwd=cwd, timeout=builder.CLAUDE_TIMEOUT_SECONDS)
+        log(f"claude exited {r.returncode}")
+        log((r.stdout or "")[-3000:])
+        return True
+    except subprocess.TimeoutExpired:
+        stuck(job_id, chat_id, "the build attempt timed out after 40 minutes")
+        return False
+
+
+def external_build(job_id, task, chat_id, owner_repo, branch) -> None:
+    """Clone an external GitHub repo, implement the task on a branch, push, and
+    open a PR. Never merges — Bo reviews/edits the PR (and the local clone)."""
+    name = owner_repo.split("/")[-1]
+    workdir = builder.BUILDS / f"{name}-job{job_id}"
+    builder.BUILDS.mkdir(parents=True, exist_ok=True)
+
+    if not workdir.exists():
+        log(f"cloning {owner_repo} -> {workdir}")
+        c = run(["gh", "repo", "clone", owner_repo, str(workdir)], cwd=builder.BUILDS, timeout=300)
+        if c.returncode != 0:
+            mark(job_id, status=JobStatus.FAILED, error="clone failed", done=True)
+            notify(chat_id, f"Build {job_id} failed: couldn't clone {owner_repo}. "
+                            f"({(c.stderr or c.stdout or '')[-160:]})")
+            return
+        run(["git", "checkout", "-b", branch], cwd=workdir)
+
+    base = run(["git", "rev-parse", "HEAD"], cwd=workdir).stdout.strip()
+    gfile = workdir / "GUIDANCE.md"
+    guidance = f"\nGuidance from Bo (follow it):\n{gfile.read_text()}\n" if gfile.exists() else ""
+    prompt = EXTERNAL_PROMPT.format(workdir=workdir, branch=branch, task=task, guidance=guidance)
+
+    if not claude_run(prompt, workdir, job_id, chat_id):
+        return
+
+    if (workdir / "BLOCKED.md").exists():
+        stuck(job_id, chat_id, (workdir / "BLOCKED.md").read_text().strip()[:600])
+        return
+    # Auto-commit anything the agent left uncommitted (external projects vary).
+    if run(["git", "status", "--porcelain"], cwd=workdir).stdout.strip():
+        run(["git", "add", "-A"], cwd=workdir)
+        run(["git", "commit", "-m", f"borina: {task[:60]}"], cwd=workdir)
+    n_commits = run(["git", "rev-list", f"{base}..HEAD", "--count"], cwd=workdir).stdout.strip()
+    if n_commits in ("", "0"):
+        stuck(job_id, chat_id, "no commits were produced - clarify the task or 'abort'")
+        return
+
+    push = run(["git", "push", "-u", "origin", branch], cwd=workdir)
+    if push.returncode != 0:
+        mark(job_id, status=JobStatus.FAILED, error="push failed", done=True)
+        notify(chat_id, f"Build {job_id}: implemented {n_commits} commit(s) at {workdir}, "
+                        f"but push failed: {(push.stderr or '')[-160:]}. Edit locally and push manually.")
+        return
+    pr = run(["gh", "pr", "create", "--title", f"borina: {task[:70]}",
+              "--body", f"Autonomous build by Borina mesh (job {job_id}).\n\nTask: {task}",
+              "--head", branch], cwd=workdir)
+    pr_url = (pr.stdout or "").strip().splitlines()[-1] if pr.returncode == 0 else ""
+    mark(job_id, status=JobStatus.COMPLETED, done=True)
+    msg = f"Built {name} (job {job_id}): {task[:100]}\n{n_commits} commit(s) on branch {branch}."
+    if pr_url:
+        msg += f"\nPR: {pr_url}"
+    msg += f"\nEdit locally: {workdir}"
+    notify(chat_id, msg)
+    log(f"external build done: {pr_url or workdir}")
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--job-id", type=int, required=True)
@@ -170,6 +257,12 @@ def main() -> None:
             log(f"no job {a.job_id}")
             return
         task, chat_id, branch = job.prompt, job.telegram_chat_id, job.worker_branch
+        repo_path = job.repo_path or str(REPO)
+
+    # External GitHub project → clone + PR flow (never merges/deploys).
+    if repo_path.startswith("gh:"):
+        external_build(a.job_id, task, chat_id, repo_path[3:], branch or f"borina/job{a.job_id}")
+        return
 
     wt = builder.BUILDS / f"job{a.job_id}"
     if not wt.exists():

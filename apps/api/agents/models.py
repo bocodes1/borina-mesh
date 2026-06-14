@@ -11,6 +11,8 @@ AGENT_MODELS: dict[str, str] = {
     "trader":           "claude-sonnet-4-6",
     "adset-optimizer":  "claude-sonnet-4-6",
     "inbox-triage":     "claude-haiku-4-5-20251001",
+    "planner":          "claude-sonnet-4-6",
+    "builder":          "claude-opus-4-8",
 }
 
 def resolve_model(agent_id: str) -> str:

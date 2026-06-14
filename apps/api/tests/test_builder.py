@@ -173,3 +173,53 @@ def test_status_includes_builder_jobs(monkeypatch):
         s.add(j); s.commit()
     text = tg._fleet_status_text()
     assert "builder" in text and "add ping" in text
+
+
+# ── external-repo builds (Phase 7) ───────────────────────────────────────────
+
+def test_resolve_repo_spec():
+    assert builder._resolve_repo_spec(None) == str(builder.REPO)
+    assert builder._resolve_repo_spec("coordlayer") == "gh:bocodes1/coordlayer"
+    assert builder._resolve_repo_spec("someone/thing") == "gh:someone/thing"
+
+
+def test_start_build_records_external_repo(monkeypatch):
+    job_id = builder.start_build("add dark mode", BO, repo="coordlayer")
+    with Session(engine) as s:
+        job = s.get(Job, job_id)
+    assert job.repo_path == "gh:bocodes1/coordlayer"
+    assert job.kind == "builder"
+
+
+def test_build_command_parses_external_repo(monkeypatch):
+    sent = []
+    monkeypatch.setattr(dispatcher, "send_telegram_message",
+                        lambda cid, txt: sent.append(txt) or 1)
+    started = {}
+    monkeypatch.setattr(builder, "start_build",
+                        lambda task, chat_id, repo=None: started.update(task=task, repo=repo) or 42)
+    res = tg.process_update(_msg(905, "build coordlayer: add a dark mode toggle"))
+    assert res["status"] == "build_started"
+    assert started["repo"] == "coordlayer"
+    assert started["task"] == "add a dark mode toggle"
+
+
+def test_build_command_self_build_has_no_repo(monkeypatch):
+    monkeypatch.setattr(dispatcher, "send_telegram_message", lambda cid, txt: 1)
+    started = {}
+    monkeypatch.setattr(builder, "start_build",
+                        lambda task, chat_id, repo=None: started.update(task=task, repo=repo) or 43)
+    res = tg.process_update(_msg(906, "build: add a /healthz endpoint"))
+    assert res["status"] == "build_started"
+    assert started["repo"] is None
+    assert started["task"] == "add a /healthz endpoint"
+
+
+def test_builder_word_trigger(monkeypatch):
+    monkeypatch.setattr(dispatcher, "send_telegram_message", lambda cid, txt: 1)
+    started = {}
+    monkeypatch.setattr(builder, "start_build",
+                        lambda task, chat_id, repo=None: started.update(task=task, repo=repo) or 44)
+    res = tg.process_update(_msg(907, "builder: refactor the auth module"))
+    assert res["status"] == "build_started"
+    assert started["task"] == "refactor the auth module"

@@ -73,7 +73,12 @@ def _handle_plan_callback(data: str, chat_id: int) -> dict:
 
 
 _STATUS_RE = re.compile(r"^\s*(status|agents|fleet)\s*\??\s*$", re.IGNORECASE)
-_BUILD_RE = re.compile(r"^\s*(build|ship)\s*[:,]\s+(.+)$", re.IGNORECASE | re.DOTALL)
+# "build: task" / "ship: task" / "builder: task" → self-build (this mesh).
+# "build <repo>: task" → external GitHub project. repo is one token before the colon.
+_BUILD_RE = re.compile(
+    r"^\s*(?:build|ship|builder)(?:\s+(?P<repo>[\w.\-/]+))?\s*[:,]\s+(?P<task>.+)$",
+    re.IGNORECASE | re.DOTALL,
+)
 
 
 def _fleet_status_text() -> str:
@@ -169,12 +174,14 @@ def process_update(update: dict) -> dict:
     if bm:
         from dispatch import builder
 
-        job_id = builder.start_build(bm.group(2).strip(), chat_id)
+        repo = bm.group("repo")
+        job_id = builder.start_build(bm.group("task").strip(), chat_id, repo=repo)
+        where = f" on {repo}" if repo else ""
         dispatcher.send_telegram_message(
             chat_id,
             format_telegram(
-                f"{heard}Builder started (job {job_id}). I will only ping you if "
-                f"stuck - otherwise the next message is the ship report."
+                f"{heard}Builder started (job {job_id}){where}. I will only ping you if "
+                f"stuck - otherwise the next message is the result."
             ),
         )
         return {"ok": True, "status": "build_started", "job_id": job_id}

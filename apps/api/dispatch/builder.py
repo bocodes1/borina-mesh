@@ -49,15 +49,31 @@ Rules:
 
 # ── control plane (called from routes/telegram.py) ───────────────────────────
 
-def start_build(task: str, chat_id: int) -> int:
-    """Create the builder Job row and spawn the detached runner. Returns job id."""
+DEFAULT_OWNER = os.getenv("BORINA_GH_OWNER", "bocodes1")
+
+
+def _resolve_repo_spec(repo: Optional[str]) -> str:
+    """None → this repo (self-build). 'name' → gh:OWNER/name. 'owner/name' →
+    gh:owner/name. The 'gh:' prefix tells the runner to use the external flow."""
+    if not repo:
+        return str(REPO)
+    repo = repo.strip().strip("/")
+    if "/" in repo:
+        return f"gh:{repo}"
+    return f"gh:{DEFAULT_OWNER}/{repo}"
+
+
+def start_build(task: str, chat_id: int, repo: Optional[str] = None) -> int:
+    """Create the builder Job row and spawn the detached runner. Returns job id.
+    `repo` None = build this mesh; otherwise an external GitHub project."""
     from db import session_scope
     from models import Job, JobStatus
 
+    repo_path = _resolve_repo_spec(repo)
     with session_scope() as s:
         job = Job(
             agent_id="builder", prompt=task, status=JobStatus.RUNNING,
-            kind="builder", repo_path=str(REPO), base_branch="main",
+            kind="builder", repo_path=repo_path, base_branch="main",
             started_at=datetime.utcnow(), telegram_chat_id=chat_id,
         )
         s.add(job)
