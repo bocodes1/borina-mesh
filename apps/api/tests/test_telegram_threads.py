@@ -38,10 +38,12 @@ def test_record_and_find_thread():
 
 
 def test_produce_and_reply_records_thread(monkeypatch, tmp_path):
-    async def fake_run_agent(agent_id, prompt):
-        return "# r\n\nbody"
+    from dispatch import answer
 
-    monkeypatch.setattr(dispatcher, "run_agent", fake_run_agent)
+    async def fake_answer(agent_id, prompt, job_id):
+        return "summary\n\nbody"
+
+    monkeypatch.setattr(answer, "run_agent_for_answer", fake_answer)
     monkeypatch.setattr(dispatcher, "render_markdown_pdf", lambda md, p: p)
     monkeypatch.setattr(dispatcher, "send_telegram_message", lambda *a, **k: 777)
     monkeypatch.setattr(dispatcher, "send_telegram_document", lambda *a, **k: None)

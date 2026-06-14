@@ -104,3 +104,23 @@ def test_big_task_expands_with_leading_tldr():
     assert not EMOJI_RE.search(out)         # still emoji-free
     assert len(out) <= MAX_LEN              # still capped
     assert len([l for l in out.split("\n") if l]) > 3  # expanded beyond terse
+
+
+def test_format_answer_reply_sends_the_answer_not_one_line():
+    from dispatch.telegram_format import format_answer_reply
+    md = ("BTC held $60K overnight, up 2%.\n\n"
+          "The bounce is intact but the 30yr is still elevated. "
+          "Watch core CPI tomorrow.")
+    out = format_answer_reply(agent="researcher", markdown=md, deep_link="http://x/a")
+    # The actual answer content is present (not collapsed to a headline).
+    assert "30yr is still elevated" in out
+    assert "BTC held" in out
+    # No emojis, escaped, within Telegram's limit.
+    assert len(out) <= 4096
+
+
+def test_format_answer_reply_caps_long_answers():
+    from dispatch.telegram_format import format_answer_reply
+    md = "summary line\n\n" + ("x " * 5000)
+    out = format_answer_reply(agent="ceo", markdown=md, deep_link="http://x/a")
+    assert len(out) <= 4096

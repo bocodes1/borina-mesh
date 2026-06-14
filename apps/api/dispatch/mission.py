@@ -39,9 +39,11 @@ Lead with the answer, reconcile disagreements explicitly, no filler. No emojis."
 
 async def run_agent(agent_id: str, prompt: str) -> str:
     from agents.runner_v2 import run_agent_task
+    from dispatch.answer import clean_agent_output
 
     result = await run_agent_task(agent_id, prompt)
-    return getattr(result, "output", None) or ""
+    # Strip tmux/TUI chrome so mission sections + synthesis aren't pane garbage.
+    return clean_agent_output(getattr(result, "output", None) or "")
 
 
 def _parse_subtasks(text: str) -> Optional[list[dict]]:

@@ -118,27 +118,36 @@ async def dispatch_intent(intent: Intent, chat_id: int, requested_at: Optional[s
 
 
 async def _produce_and_reply(intent: Intent, chat_id: int, job_id: int, requested_at: str) -> dict:
-    """Run agent → PDF → artifact → Telegram reply for an already-created job
-    row. Used by the direct path AND the background worker (which pre-creates
-    the queued job, then marks it running before calling this)."""
+    """Run agent → clean answer → (opt-in PDF) → artifact → Telegram reply for an
+    already-created job row. Used by the direct path AND the background worker.
+
+    The reply carries the agent's ANSWER, never the raw tmux pane (see
+    dispatch.answer). A PDF is attached ONLY when the request asked for one."""
+    from dispatch import answer
+    from dispatch.telegram_format import (
+        format_answer_reply, format_dispatch_reply, format_telegram,
+    )
+
     day = today_str()
-    prompt = _build_prompt(intent)
     if intent.task_type == "mission":
         from dispatch.mission import run_mission
-        from dispatch.telegram_format import format_telegram
 
         markdown = await run_mission(
             intent.raw_text,
             progress=lambda m: send_telegram_message(chat_id, format_telegram(m)),
         )
     else:
-        markdown = await run_agent(intent.agent, prompt)
+        prompt = _build_prompt(intent)
+        markdown = await answer.run_agent_for_answer(intent.agent, prompt, job_id)
     if not markdown.strip():
-        markdown = f"# {intent.agent} report\n\n(No output produced.)"
+        markdown = "(No output produced.)"
 
-    name = f"{intent.agent}-{job_id}-{day}.pdf"
-    pdf_path = _reports_root() / day / name
-    render_markdown_pdf(markdown, pdf_path)
+    # Always persist a clean markdown artifact (browsable in the Files tab and
+    # the deep link target) + the Obsidian brain write-back.
+    md_name = f"{intent.agent}-{job_id}-{day}.md"
+    md_path = _reports_root() / day / md_name
+    md_path.parent.mkdir(parents=True, exist_ok=True)
+    md_path.write_text(markdown)
 
     meta = {
         "source": "telegram",
@@ -148,41 +157,61 @@ async def _produce_and_reply(intent: Intent, chat_id: int, job_id: int, requeste
         "prompt": intent.raw_text,
         "job_id": job_id,
     }
-    write_artifact_meta(day, name, meta)
+    write_artifact_meta(day, md_name, meta)
     _complete_job(job_id, markdown)
 
-    # Persist what we learned into the Obsidian vault (no-op without a vault;
-    # never raises) so briefs/planner/agents can reuse it.
     from dispatch.vault_writeback import save_dispatch_to_vault
     save_dispatch_to_vault(intent.agent, intent.raw_text, markdown, day, job_id)
 
-    deep_link = f"http://{_public_host()}/artifacts?id={day}/{name}"
-    # Outbound reply goes through the formatter so it's short, emoji-free, clean.
-    from dispatch.telegram_format import format_dispatch_reply
+    want_pdf = answer.wants_pdf(intent.raw_text)
+    artifact_name = md_name
+    if want_pdf:
+        # Opt-in PDF: render + attach, terse chat reply pointing at it.
+        artifact_name = f"{intent.agent}-{job_id}-{day}.pdf"
+        pdf_path = _reports_root() / day / artifact_name
+        render_markdown_pdf(markdown, pdf_path)
+        write_artifact_meta(day, artifact_name, meta)
+        deep_link = f"http://{_public_host()}/artifacts?id={day}/{artifact_name}"
+        text = format_dispatch_reply(agent=intent.agent, markdown=markdown, deep_link=deep_link)
+        sent_id = send_telegram_message(chat_id, text)
+        send_telegram_document(chat_id, pdf_path, caption=f"{intent.agent} report")
+    else:
+        # Default: the clean answer IS the chat reply. No PDF.
+        deep_link = f"http://{_public_host()}/artifacts?id={day}/{md_name}"
+        text = format_answer_reply(agent=intent.agent, markdown=markdown, deep_link=deep_link)
+        sent_id = send_telegram_message(chat_id, text)
 
-    text = format_dispatch_reply(
-        agent=intent.agent, markdown=markdown, deep_link=deep_link
-    )
-    sent_id = send_telegram_message(chat_id, text)
     _record_thread(chat_id, sent_id, intent.agent, job_id, intent.raw_text)
-    send_telegram_document(chat_id, pdf_path, caption=f"{intent.agent} report")
 
     return {
         "job_id": job_id,
-        "artifact": {"date": day, "name": name, "path": f"{day}/{name}", "meta": meta},
+        "artifact": {"date": day, "name": artifact_name, "path": f"{day}/{artifact_name}", "meta": meta},
         "deep_link": deep_link,
         "summary": _summarize(markdown),
+        "pdf": want_pdf,
     }
 
 
 def _build_prompt(intent: Intent) -> str:
     extra = f"\nParameters: {json.dumps(intent.params)}" if intent.params else ""
+
+    # Recall relevant context from the vault (the machine's brain) so answers
+    # build on what the mesh already knows. Empty string without a vault.
+    brain = ""
+    try:
+        from dispatch.vault_brain import recall
+
+        brain = recall(intent.raw_text)
+    except Exception:  # noqa: BLE001
+        brain = ""
+    brain_block = f"\n\n{brain}\n" if brain else ""
+
     return (
         f"Telegram request (read-only intel only — never place orders, transfer funds, "
-        f"send messages, or modify anything): {intent.raw_text}{extra}\n\n"
-        f"Produce a complete markdown report — this becomes the attached PDF, so put the depth here. "
-        f"The FIRST line must be a one-sentence plain summary suitable for a terse chat reply "
-        f"(the chat reply is one short line by default; never write paragraphs in chat). No emojis."
+        f"send messages, or modify anything): {intent.raw_text}{extra}{brain_block}\n\n"
+        f"Answer the request directly and concisely. Lead with a one-sentence summary, "
+        f"then the supporting detail. Plain prose, no emojis. If you used the brain context "
+        f"above, build on it rather than repeating it."
     )
 
 

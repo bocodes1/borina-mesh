@@ -108,6 +108,23 @@ def format_telegram(raw: str, *, limit: int = MAX_LEN, max_lines: int | None = N
     return truncate(capped, limit=limit)
 
 
+def format_answer_reply(*, agent: str, markdown: str, deep_link: str = "", limit: int = MAX_LEN) -> str:
+    """No-PDF chat reply: send the agent's ACTUAL answer (cleaned, escaped,
+    capped to Telegram's limit), not a one-line headline. This is the DEFAULT —
+    the PDF path (format_dispatch_reply) is opt-in.
+
+    The answer already went through clean_agent_output upstream, so here we just
+    normalize whitespace, strip emojis, escape MarkdownV2, and length-cap.
+    """
+    cleaned = normalize_whitespace(strip_emojis(markdown))
+    escaped = escape_markdown_v2(cleaned)
+    pointer = ""
+    if deep_link:
+        pointer = "\n\n" + f"[open in mesh]({_escape_link(deep_link)})"
+    body = truncate(escaped, limit=max(0, limit - len(pointer)))
+    return body + pointer
+
+
 def _headline_and_body(markdown: str) -> tuple[str, list[str]]:
     cleaned = normalize_whitespace(strip_emojis(markdown))
     lines = [ln for ln in cleaned.splitlines() if ln.strip()]

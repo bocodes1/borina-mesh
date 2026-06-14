@@ -61,17 +61,16 @@ def test_never_raises(monkeypatch, tmp_path):
 
 def test_dispatcher_calls_writeback(monkeypatch, tmp_path):
     """_produce_and_reply persists to the vault after completing the job."""
-    from dispatch import dispatcher
+    from dispatch import dispatcher, answer
     from dispatch.intent import Intent
 
     monkeypatch.setenv("OBSIDIAN_VAULT_PATH", str(tmp_path))
 
-    async def fake_run_agent(agent_id, prompt):
-        return "# report\n\nbody"
+    async def fake_answer(agent_id, prompt, job_id):
+        return "summary line\n\nbody"
 
-    monkeypatch.setattr(dispatcher, "run_agent", fake_run_agent)
-    monkeypatch.setattr(dispatcher, "render_markdown_pdf", lambda md, p: p)
-    monkeypatch.setattr(dispatcher, "send_telegram_message", lambda *a, **k: None)
+    monkeypatch.setattr(answer, "run_agent_for_answer", fake_answer)
+    monkeypatch.setattr(dispatcher, "send_telegram_message", lambda *a, **k: 1)
     monkeypatch.setattr(dispatcher, "send_telegram_document", lambda *a, **k: None)
 
     intent = Intent(raw_text="what moved", agent="researcher",
