@@ -513,3 +513,38 @@ agent absent.
 - **Mission (job 1924):** live `mission:` through the production worker → CEO decompose →
   agents → synthesis COMPLETED; reconciled risk report (CPI/30yr + Iran-oil with confirmation
   triggers) delivered to Bo + vault write-back. All goal items verified end-to-end.
+
+# Phase 7 — 2026-06-14 (clean output, PDF opt-in, Obsidian brain, builder agent)
+
+## §1 Garbage PDF fixed — clean answer via file handoff ✅
+- ROOT CAUSE: dispatch PDF'd the raw tmux pane scrollback (echoed prompt, ⏺ tool calls,
+  Bash(...)/Write() blocks, box-drawing, feedback prompt) — the agent had written a clean report
+  file the dispatcher ignored. Same "pane capture is lossy" lesson as the brief/planner.
+- `dispatch/answer.py`: agent writes its final answer to a handoff file (answers/job{id}.md in its
+  workdir); dispatcher reads THAT. Aggressive fallback cleaner (`clean_agent_output`) strips all
+  TUI/tool chrome if the file is missing. Mission sub-outputs cleaned too.
+- Live: job 2181/2184/2185/2186 all garbage=False; the answers are clean prose.
+
+## §2 PDF opt-in ✅
+- `answer.wants_pdf()` gates PDF: default reply is the clean answer in chat
+  (`format_answer_reply`); a PDF is rendered+attached ONLY when the request says
+  pdf/report/document/write-up. Always saves a browsable .md artifact + vault write-back.
+- Live: job 2184 (no "pdf" word) → pdf=False; job 2185 ("detailed pdf report") → pdf=True, valid
+  PDF 1.7 with clean source.
+
+## §3 Obsidian brain (OpenClaw-style) ✅
+- `dispatch/vault_brain.py`: recall() scans vault (reports/daily/brain) by keyword overlap and
+  injects relevant context into every agent prompt; remember() appends durable facts to
+  04-resources/brain/memory.md. Telegram `remember:`/`recall:` commands. Closes the read+write
+  loop with the existing write-back: the mesh reads what it knew and writes what it learned.
+- Live: remembered "coordlayer phase 11 is next" via Telegram → landed in the vault brain → recall
+  returned it.
+
+## §4 Builder agent + external projects ✅
+- `agents/builder.py`: BuilderAgent registered in the fleet (opus tier; shows in status/dashboard).
+- `build <repo>: <task>` clones an external GitHub repo, implements on a branch, pushes, opens a
+  PR (never merges external); the clone persists at ~/.borina/builds/<repo>-job<id> so Bo can edit
+  anytime. `build:`/`builder:` still self-builds + ships this mesh.
+- Live: `build coordlayer: add CONTRIBUTING.md` → opened PR bocodes1/coordlayer#1 (117 lines,
+  accurate, OPEN) fully autonomously; editable clone on disk.
+- Backend 276 → **283** tests green across the phase.
