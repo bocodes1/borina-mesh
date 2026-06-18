@@ -38,7 +38,11 @@ import pytest  # noqa: E402
 
 @pytest.fixture(scope="session", autouse=True)
 def _init_test_db():
-    """Create tables once for the isolated DB."""
+    """Create tables once for the isolated DB. Import `models` first so EVERY
+    table model is registered with SQLModel.metadata before create_all — without
+    this, running a single test file (that doesn't transitively import a given
+    model) would leave its table missing."""
+    import models  # noqa: F401 — registers Job/AgentRun/AgentConfig/PlanItem/Task/...
     from db import init_db
 
     init_db()

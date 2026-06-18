@@ -21,6 +21,9 @@ class Job(SQLModel, table=True):
     agent_id: str = Field(index=True)
     prompt: str
     status: JobStatus = Field(default=JobStatus.PENDING, index=True)
+    # Higher runs first (L4 self-management). user=100, follow-up=90, internal=60,
+    # scheduled cron=50 (default), sweep/backfill=10.
+    priority: int = Field(default=50, index=True)
     created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
@@ -52,9 +55,11 @@ class AgentRun(SQLModel, table=True):
 
 
 class AgentConfig(SQLModel, table=True):
-    """Persistent per-agent configuration (schedule, enabled, etc.)."""
+    """Persistent per-agent configuration + the fleet roster source of truth.
+    `state` is the lifecycle: active | parked | retired (see fleet_roster.py)."""
     agent_id: str = Field(primary_key=True)
     enabled: bool = True
+    state: str = Field(default="active", index=True)
     schedule_cron: Optional[str] = None
     last_run_at: Optional[datetime] = None
 
@@ -90,6 +95,32 @@ class Task(SQLModel, table=True):
     done: bool = Field(default=False, index=True)
     sort_order: int = Field(default=0)
     created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
+
+
+class Goal(SQLModel, table=True):
+    """A long-horizon goal (L3). The durable unit; milestones are its plan. The
+    live Job (kind='goal') carries the detached pid/log like the builder."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    job_id: Optional[int] = Field(default=None, foreign_key="job.id", index=True)
+    text: str
+    status: str = Field(default="planning", index=True)  # planning|running|checkin|paused|done|aborted|failed
+    cancel_requested: bool = Field(default=False)         # polled flag — NOT a kill
+    cursor: int = Field(default=0)                         # index of current milestone
+    chat_id: Optional[int] = None
+    created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class Milestone(SQLModel, table=True):
+    """One step of a Goal's plan (L3)."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    goal_id: int = Field(foreign_key="goal.id", index=True)
+    seq: int = Field(index=True)
+    title: str
+    status: str = Field(default="pending")                # pending|active|done|skipped|blocked
+    result: Optional[str] = None                           # cleaned summary for the check-in card
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
 
 
 class TelegramThread(SQLModel, table=True):

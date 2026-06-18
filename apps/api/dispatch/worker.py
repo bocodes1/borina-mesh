@@ -40,9 +40,11 @@ def progress_ping_seconds() -> int:
 
 
 # ── persisted-queue primitives (sync; directly unit-testable) ────────────────
-def enqueue_job(text: str, agent: str, update_id: Optional[int], chat_id: int) -> Optional[Job]:
+def enqueue_job(text: str, agent: str, update_id: Optional[int], chat_id: int,
+                priority: int = 100) -> Optional[Job]:
     """Create a queued telegram_dispatch job. Returns None if update_id was
-    already seen (idempotency) so a retried Telegram update never double-runs."""
+    already seen (idempotency) so a retried Telegram update never double-runs.
+    Priority defaults to 100 (user-initiated) so a real ask jumps the cron flood."""
     with session_scope() as s:
         if update_id is not None:
             existing = s.exec(select(Job).where(Job.telegram_update_id == update_id)).first()
@@ -53,6 +55,7 @@ def enqueue_job(text: str, agent: str, update_id: Optional[int], chat_id: int) -
             prompt=text,
             status=JobStatus.QUEUED,
             kind=KIND,
+            priority=priority,
             telegram_update_id=update_id,
             telegram_chat_id=chat_id,
         )
@@ -85,7 +88,7 @@ def claim_next() -> Optional[Job]:
         job = s.exec(
             select(Job)
             .where(Job.kind == KIND, Job.status == JobStatus.QUEUED)
-            .order_by(Job.created_at)
+            .order_by(Job.priority.desc(), Job.created_at)  # priority first, then FIFO
         ).first()
         if job is None:
             return None

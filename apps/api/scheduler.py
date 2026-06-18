@@ -59,6 +59,23 @@ class SchedulerService:
             self._scheduler.remove_job(job_id)
         self._schedules.pop(agent_id, None)
 
+    def _persist_cron(self, agent_id: str, cron: str) -> None:
+        """Persist a schedule to AgentConfig so it's inspectable and survives a
+        restart (the in-memory APScheduler jobstore does not)."""
+        try:
+            from db import engine
+            from models import AgentConfig
+            from sqlmodel import Session
+            with Session(engine) as s:
+                row = s.get(AgentConfig, agent_id)
+                if row is None:
+                    row = AgentConfig(agent_id=agent_id)
+                row.schedule_cron = cron
+                s.add(row)
+                s.commit()
+        except Exception as e:  # noqa: BLE001
+            print(f"[scheduler] could not persist cron for {agent_id}: {e}")
+
     def list_schedules(self) -> dict[str, str]:
         return dict(self._schedules)
 
@@ -90,13 +107,21 @@ class SchedulerService:
             # default agent yet — spawn via Memory Curator agent when added.
         }
         from agents.base import registry
-        for agent_id, cron in DEFAULT_SCHEDULES.items():
+        # Honor the fleet roster: only ACTIVE agents get scheduled. Parked and
+        # retired agents produce no crons (fixes the cron-noise the user saw).
+        try:
+            from fleet_roster import active_scheduled_agents
+            schedules = active_scheduled_agents(DEFAULT_SCHEDULES)
+        except Exception:  # noqa: BLE001
+            schedules = DEFAULT_SCHEDULES
+        for agent_id, cron in schedules.items():
             if not registry.get(agent_id):
                 continue
             if agent_id in self._schedules:
                 continue
             try:
                 self.set_schedule(agent_id, cron)
+                self._persist_cron(agent_id, cron)
                 print(f"[scheduler] Registered default: {agent_id} @ {cron}")
             except Exception as e:
                 print(f"[scheduler] Failed to register {agent_id}: {e}")
@@ -233,6 +258,75 @@ class SchedulerService:
             print("[scheduler] Registered default: finance-brief @ 5am ET")
         except Exception as e:
             print(f"[scheduler] Failed to register finance brief: {e}")
+
+    async def _run_fleet_health(self) -> None:
+        """Weekly: compute fleet-health findings and send the health Card. Does
+        NOT auto-park here (auto-park stays a separate opt-in sweep) — surfaces +
+        offers buttons. Retire is never automatic."""
+        try:
+            import os
+            from db import engine
+            from fleet.health import check_fleet
+            from fleet.cards import health_card
+            findings = check_fleet(engine)
+            chat = os.getenv("TELEGRAM_CHAT_ID", "").strip()
+            if chat:
+                from dispatch.cards import send_card
+                send_card(int(chat), health_card(findings))
+            print(f"[scheduler] fleet-health: {len(findings)} finding(s)")
+        except Exception as e:
+            print(f"[scheduler] fleet-health error: {e}")
+
+    def register_fleet_health(self) -> None:
+        """Weekly fleet-health report — Mondays 08:00 ET."""
+        try:
+            from zoneinfo import ZoneInfo
+            tz = ZoneInfo("America/New_York")
+        except Exception:
+            tz = None
+        job_id = "fleet-health"
+        if self._scheduler.get_job(job_id):
+            return
+        try:
+            trigger = CronTrigger(day_of_week="mon", hour=8, minute=0, timezone=tz) if tz \
+                else CronTrigger(day_of_week="mon", hour=13, minute=0)
+            self._scheduler.add_job(self._run_fleet_health, trigger=trigger, id=job_id, replace_existing=True)
+            self._schedules["fleet-health"] = "0 8 * * mon America/New_York"
+            print("[scheduler] Registered default: fleet-health @ Mon 8am ET")
+        except Exception as e:
+            print(f"[scheduler] Failed to register fleet-health: {e}")
+
+    async def _run_operator(self, phase: str) -> None:
+        """Run a daily-operator phase (morning/midday/eod). Proposes via Cards;
+        never writes the calendar."""
+        try:
+            from daily_operator import run_phase
+            await run_phase(phase)
+            print(f"[scheduler] operator {phase} ran")
+        except Exception as e:
+            print(f"[scheduler] operator {phase} error: {e}")
+
+    def register_operator(self) -> None:
+        """Register the daily operator: morning 07:00, midday 13:00, eod 18:00 ET."""
+        try:
+            from zoneinfo import ZoneInfo
+            tz = ZoneInfo("America/New_York")
+        except Exception:
+            tz = None
+        for phase, hour in (("morning", 7), ("midday", 13), ("eod", 18)):
+            job_id = f"operator-{phase}"
+            if self._scheduler.get_job(job_id):
+                continue
+            try:
+                trigger = CronTrigger(hour=hour, minute=15, timezone=tz) if tz else CronTrigger(hour=hour + 5, minute=15)
+                self._scheduler.add_job(
+                    self._run_operator, trigger=trigger, args=[phase],
+                    id=job_id, replace_existing=True,
+                )
+                self._schedules[job_id] = f"15 {hour} * * * America/New_York"
+                print(f"[scheduler] Registered default: operator-{phase} @ {hour}:15 ET")
+            except Exception as e:
+                print(f"[scheduler] Failed to register operator-{phase}: {e}")
 
     async def _run_agent(self, agent_id: str) -> None:
         """Execute an agent's scheduled run with full Job/AgentRun persistence."""

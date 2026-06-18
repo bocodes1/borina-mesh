@@ -44,22 +44,26 @@ def render_markdown_pdf(markdown: str, out_path: Path) -> Path:
     return out_path
 
 
-def send_telegram_message(chat_id: int, text: str) -> Optional[int]:
+def send_telegram_message(chat_id: int, text: str, reply_markup: Optional[dict] = None) -> Optional[int]:
     """Send; returns Telegram's message_id (None offline/on failure) so the
-    reply can be recorded as a thread anchor."""
+    reply can be recorded as a thread anchor. Pass `reply_markup` (an
+    inline_keyboard dict) to attach buttons — used by the Card channel."""
     from integrations.base import http_post_json
 
     token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
     if not token:
         return None
+    payload = {
+        "chat_id": chat_id,
+        "text": text,
+        "parse_mode": "HTML",
+        "disable_web_page_preview": True,
+    }
+    if reply_markup is not None:
+        payload["reply_markup"] = reply_markup
     resp = http_post_json(
         f"https://api.telegram.org/bot{token}/sendMessage",
-        json={
-            "chat_id": chat_id,
-            "text": text,
-            "parse_mode": "MarkdownV2",
-            "disable_web_page_preview": True,
-        },
+        json=payload,
     )
     try:
         return int((resp.get("result") or {}).get("message_id"))
