@@ -397,12 +397,16 @@ def approve_item(item_id: int) -> dict:
             item.committed_ref = str(t.id)
             committed = True
 
-        item.status = "approved"
-        item.decided_at = datetime.utcnow()
-        s.add(item)
-        s.commit()
+        # Only finalize when the write actually committed. A calendar item
+        # approved while disconnected stays 'proposed' so it can be retried
+        # once the calendar is connected — never silently lost.
+        if committed:
+            item.status = "approved"
+            item.decided_at = datetime.utcnow()
+            s.add(item)
+            s.commit()
         return {
-            "status": "approved",
+            "status": item.status,
             "kind": item.kind,
             "committed": committed,
             "committed_ref": item.committed_ref,

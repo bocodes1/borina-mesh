@@ -60,7 +60,7 @@ def _handle_plan_callback(data: str, chat_id: int) -> dict:
     try:
         if action == "approve":
             res = approve_item(item_id)
-            msg = "Approved." if res.get("committed") else "Approved (calendar not connected)."
+            msg = "Approved." if res.get("committed") else "Calendar not connected — still pending."
         elif action == "reject":
             reject_item(item_id)
             msg = "Rejected."

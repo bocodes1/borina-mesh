@@ -87,6 +87,35 @@ def test_approve_calendar_item_triggers_one_user_initiated_write(monkeypatch):
     assert len(calls) == 1
 
 
+def test_approve_calendar_item_while_disconnected_stays_proposed(monkeypatch):
+    """If the calendar write doesn't commit (not connected), the item must stay
+    'proposed' so it can be approved again later — never silently lost."""
+    from integrations.base import not_connected
+
+    def fake(event, *, user_initiated=False, calendar_id="primary"):
+        return not_connected("google_calendar", "Google Calendar not authorized")
+
+    monkeypatch.setattr(google_calendar, "create_event", fake)
+    planner.generate_plan()
+    plan = planner.get_plan()
+    cal_item = next(i for i in plan["items"] if i["kind"] == "calendar")
+
+    res = planner.approve_item(cal_item["id"])
+    assert res["committed"] is False
+    # still proposed → retryable
+    with session_scope() as s:
+        item = s.get(PlanItem, cal_item["id"])
+        assert item.status == "proposed"
+
+    # once connected, a re-approve commits the write
+    calls = _spy_create_event(monkeypatch)
+    res2 = planner.approve_item(cal_item["id"])
+    assert res2["committed"] is True
+    assert len(calls) == 1
+    with session_scope() as s:
+        assert s.get(PlanItem, cal_item["id"]).status == "approved"
+
+
 def test_approve_task_item_creates_task(monkeypatch):
     _spy_create_event(monkeypatch)
     planner.generate_plan()
@@ -144,3 +173,26 @@ def test_telegram_callback_security_and_approve(monkeypatch):
                     json={"callback_query": {"from": {"id": BO}, "data": f"approve:{item['id']}"}})
     assert r.json()["status"] == "approve"
     assert next(i for i in planner.get_plan()["items"] if i["id"] == item["id"])["status"] == "approved"
+
+
+def test_telegram_callback_approve_disconnected_reports_pending(monkeypatch):
+    from dispatch import dispatcher
+    from integrations.base import not_connected
+    sent = []
+    monkeypatch.setattr(dispatcher, "send_telegram_message", lambda chat, msg, **k: sent.append(msg))
+    monkeypatch.setenv("TELEGRAM_WEBHOOK_SECRET", "sek")
+    BO = 6452258223
+    monkeypatch.setenv("TELEGRAM_ALLOWED_CHAT_IDS", str(BO))
+    monkeypatch.setattr(
+        google_calendar, "create_event",
+        lambda event, **k: not_connected("google_calendar", "Google Calendar not authorized"),
+    )
+    planner.generate_plan()
+    item = next(i for i in planner.get_plan()["items"] if i["kind"] == "calendar")
+    H = {"X-Telegram-Bot-Api-Secret-Token": "sek"}
+
+    client.post("/api/telegram/webhook", headers=H,
+                json={"callback_query": {"from": {"id": BO}, "data": f"approve:{item['id']}"}})
+    # item is still pending, and the reply says so (not "Approved")
+    assert next(i for i in planner.get_plan()["items"] if i["id"] == item["id"])["status"] == "proposed"
+    assert sent and "pending" in sent[0].lower() and "approved" not in sent[0].lower()
