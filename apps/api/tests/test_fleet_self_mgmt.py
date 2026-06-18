@@ -9,8 +9,16 @@ from fleet import health, actions, cards
 
 @pytest.fixture(autouse=True)
 def _seed():
-    from db import engine
+    # Hermetic: the test DB is shared across the session, and these tests query
+    # ALL Job rows — clear them so other tests' jobs don't skew health/priority.
+    from db import engine, session_scope
+    from models import Job, AgentRun
+    from sqlmodel import delete
     import fleet_roster as fr
+    with session_scope() as s:
+        s.exec(delete(AgentRun))
+        s.exec(delete(Job))
+        s.commit()
     fr.seed_roster(engine)
     yield
 
