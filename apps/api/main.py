@@ -43,6 +43,13 @@ async def lifespan(app: FastAPI):
     print("Borina Mesh starting...")
     init_db()
     try:
+        from db import engine as _engine
+        from fleet_roster import seed_roster
+        added = seed_roster(_engine)
+        print(f"[fleet] roster seeded ({added} new agent rows)")
+    except Exception as e:
+        print(f"[fleet] roster seed error: {e}")
+    try:
         from db import engine
         from stats_helper import fail_orphaned_running_jobs
         n = fail_orphaned_running_jobs(engine)
@@ -66,6 +73,14 @@ async def lifespan(app: FastAPI):
     scheduler_service.register_finance_brief()
     scheduler_service.register_schedule_daily()
     scheduler_service.register_planner()
+    # Register the Telegram slash-command menu so /help /jobs /fleet /cancel
+    # autocomplete in the client.
+    try:
+        from routes.telegram import set_my_commands
+        if set_my_commands():
+            print("[telegram] slash commands registered")
+    except Exception as e:
+        print(f"[telegram] setMyCommands error: {e}")
     # Background Telegram dispatch worker (crash-safe queue drain).
     try:
         from dispatch.worker import worker as dispatch_worker

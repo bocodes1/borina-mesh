@@ -25,36 +25,51 @@ preamble like "here is". Lead with ONE plain summary sentence, then the detail.
 You may use tools while working, but the file must contain just the finished
 answer. Do not paste the answer into the terminal."""
 
+# ANSI / terminal control sequences — stripped before anything else.
+_ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07]*\x07|[\x00-\x08\x0b\x0c\x0e-\x1f]")
+
 # Lines that are pure TUI / tool-call chrome — dropped entirely.
 _DROP_PREFIXES = (
-    "⎿", "│", "╭", "╰", "✻", "✽", "❯", "⏵⏵",
+    "⎿", "│", "╭", "╰", "╮", "╯", "├", "┤", "└", "┌", "┐", "─", "═",
+    "✻", "✽", "❯", "⏵⏵", "▐", "▕", "█",
 )
 _DROP_CONTAINS = (
     "How is Claude doing this session",
     "bypass permissions",
     "esc to interrupt",
     "ctrl+o to expand",
+    "ctrl+c to",
     "Shell cwd was reset",
     "tokens ·",
+    "Context left until",
+    "auto-compact",
 )
-_TOOL_CALL_RE = re.compile(r"^⏺\s*(Bash|Write|Read|Edit|Update|Glob|Grep|Task|WebFetch|WebSearch|TodoWrite)\(")
+# A line that IS a tool call / command / log / diff — not prose.
+_TOOL_CALL_RE = re.compile(
+    r"^[⏺●○•]?\s*(Bash|Write|Read|Edit|Update|MultiEdit|Glob|Grep|Task|WebFetch|WebSearch|TodoWrite|NotebookEdit)\(",
+)
+_SHELL_RE = re.compile(r"^\s*(\$|❯|>>>|#)\s+\S")          # shell prompts / commands
+_DIFF_RE = re.compile(r"^\s*(\+\+\+|---|@@|\+[^+]|diff --git|index [0-9a-f])")
+_PATHY_RE = re.compile(r"^\s*(/[\w./-]+|[\w./-]+\.(py|ts|tsx|js|json|md|sh|txt)):?\s*$")
 _FEEDBACK_RE = re.compile(r"^\s*\d+:\s*(Bad|Fine|Good|Dismiss)\b")
-_SPINNER_RE = re.compile(r"^\s*[✻✽✶✷·].*\(\d+s\b")
-_MORE_LINES_RE = re.compile(r"^\s*…\s*\+\d+\s*lines")
+_SPINNER_RE = re.compile(r"^\s*[✻✽✶✷✢·∗*].*\(\d+s\b|^\s*(Running|Thinking|Working|Pondering|Cogitating)[.…]")
+_MORE_LINES_RE = re.compile(r"^\s*…?\s*[+(]\d+\s*(lines|tokens|more)")
 _INSTRUCTION_MARKERS = (
     "Produce a complete markdown report",
     "how to return your answer",
     "Write your COMPLETE final answer",
     "read-only intel only",
     "Telegram request",
+    "Do not paste the answer into the terminal",
 )
 
 
 def clean_agent_output(raw: str) -> str:
-    """Best-effort: strip tmux/TUI chrome and tool-call displays from a pane
-    capture, keeping the prose. The ⏺ marker on a prose line is removed."""
+    """Best-effort: strip tmux/TUI chrome, ANSI codes, tool-call displays, shell
+    commands and diffs from a pane capture, keeping only the prose."""
     if not raw:
         return ""
+    raw = _ANSI_RE.sub("", raw)
     out: list[str] = []
     for ln in raw.splitlines():
         s = ln.strip()
@@ -63,7 +78,7 @@ def clean_agent_output(raw: str) -> str:
             continue
         if any(s.startswith(p) for p in _DROP_PREFIXES):
             continue
-        if _TOOL_CALL_RE.match(s):
+        if _TOOL_CALL_RE.match(s) or _SHELL_RE.match(s) or _DIFF_RE.match(s) or _PATHY_RE.match(s):
             continue
         if _FEEDBACK_RE.match(s) or _SPINNER_RE.match(s) or _MORE_LINES_RE.match(s):
             continue
@@ -71,14 +86,45 @@ def clean_agent_output(raw: str) -> str:
             continue
         if any(m in s for m in _INSTRUCTION_MARKERS):
             continue
-        # Prose emitted by the model is marked with a leading ⏺ — keep the text.
-        if s.startswith("⏺"):
-            s = s[1:].strip()
+        # Prose emitted by the model is marked with a leading ⏺/● — keep the text.
+        s = re.sub(r"^[⏺●○]\s*", "", s)
         out.append(s)
-    # Collapse 3+ blank lines.
     text = "\n".join(out)
     text = re.sub(r"\n{3,}", "\n\n", text)
     return text.strip()
+
+
+# Markers that, if they survive cleaning, mean we're still looking at raw CLI.
+_CLI_SIGNATURE_RE = re.compile(
+    r"⏺|╭|╰|│|⎿|\bBash\(|\bWrite\(|\bTodoWrite\(|esc to interrupt|"
+    r"bypass permissions|\x1b\[|^\s*\$\s|@@ -\d",
+    re.MULTILINE,
+)
+
+
+def looks_like_cli_dump(text: str) -> bool:
+    """True if the text still reads like a terminal scrollback rather than an
+    answer — the last line of defence so raw CLI never reaches Telegram."""
+    if not text or len(text.strip()) < 12:
+        return True
+    if _CLI_SIGNATURE_RE.search(text):
+        return True
+    lines = [ln for ln in text.splitlines() if ln.strip()]
+    if not lines:
+        return True
+    # Mostly command/path/diff lines, almost no sentences → a dump.
+    chrome = sum(
+        1 for ln in lines
+        if _SHELL_RE.match(ln) or _DIFF_RE.match(ln) or _PATHY_RE.match(ln) or _TOOL_CALL_RE.match(ln)
+    )
+    sentences = sum(1 for ln in lines if re.search(r"[a-z]{3,}.*[.!?](\s|$)", ln))
+    return chrome > len(lines) * 0.5 and sentences == 0
+
+
+_CLI_FALLBACK = (
+    "I finished the run, but couldn't pull a clean summary out of it. "
+    "The full output is saved — open it in the mesh."
+)
 
 
 def _agent_workdir(agent_id: str) -> Path:
@@ -117,22 +163,34 @@ async def run_agent_for_answer(agent_id: str, prompt: str, job_id: int) -> str:
     try:
         if af.exists():
             txt = af.read_text().strip()
-            if len(txt) >= 20:  # a real answer, not an empty stub
+            if len(txt) >= 20 and not looks_like_cli_dump(txt):
                 return txt
     except OSError:
         pass
-    return clean_agent_output(getattr(result, "output", "") or "")
+    # Fallback: clean the pane capture. If it STILL looks like raw CLI, send a
+    # safe human line instead of dumping terminal scrollback into Telegram.
+    cleaned = clean_agent_output(getattr(result, "output", "") or "")
+    if looks_like_cli_dump(cleaned):
+        return _CLI_FALLBACK
+    return cleaned
 
 
 # ── PDF opt-in ───────────────────────────────────────────────────────────────
 
+# Explicit only — the bare word "report" no longer flips the format (that was
+# the misfire that made the same question come back in two wildly different
+# shapes). PDF is opt-in: the user has to actually ask for one.
 _PDF_RE = re.compile(
-    r"\b(pdf|reports?|write[\s-]?ups?|documents?|\bdocs?\b|in writing|"
-    r"full (write|report)|detailed (report|write))\b",
+    r"(?:^|\s)/pdf\b"
+    r"|\bpdf\b"
+    r"|\bas a (?:pdf|document)\b"
+    r"|\bin writing\b"
+    r"|\b(?:full|detailed) (?:report|write[\s-]?up)\b",
     re.IGNORECASE,
 )
 
 
 def wants_pdf(text: str) -> bool:
-    """True only when the user explicitly asks for a PDF/report/document."""
+    """True only when the user EXPLICITLY asks for a PDF (e.g. '/pdf', 'as a pdf',
+    'full report'). A bare 'report' does not trigger it."""
     return bool(_PDF_RE.search(text or ""))

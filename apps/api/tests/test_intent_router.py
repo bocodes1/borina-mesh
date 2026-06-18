@@ -19,12 +19,11 @@ def test_worked_example_resolves_to_researcher_finance_deepdive():
 @pytest.mark.parametrize(
     "text,expected_agent",
     [
-        ("what are the polymarket odds looking like today", "polymarket"),
-        ("scout some winning ecommerce products", "scout"),
+        # Active agents route by keyword. (Parked scout/adset and retired
+        # polymarket-intel now fall through to researcher — see test_fleet_roster.)
         ("triage my inbox please", "inbox"),
         ("how's the trading bot health", "trader"),
         ("research the new AI chip startups", "researcher"),
-        ("review my adset campaign roas", "adset"),
     ],
 )
 def test_alias_table(text, expected_agent):
@@ -50,6 +49,39 @@ def test_forbidden_actions_refused(text):
     assert intent.forbidden is True
     assert intent.dispatchable is False
     assert intent.forbidden_reason
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "what's the sell-off in tech about?",
+        "what happened when TSLA dropped 4% yesterday",
+        "should I buy NVDA here?",
+        "summarize the buy-side flow today",
+        "any news on the wire transfer system outage",
+        "research whether I should sell covered calls",
+    ],
+)
+def test_readonly_questions_are_not_forbidden(text):
+    # The scoped gate must stop refusing read-only questions that merely contain
+    # an action word — these are the false positives Bo complained about.
+    intent = resolve_intent(text)
+    assert intent.forbidden is False
+    assert intent.dispatchable is True
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "please buy 100 NVDA",
+        "can you sell all my ETH",
+        "go ahead and delete that event",
+    ],
+)
+def test_polite_imperatives_still_refused(text):
+    intent = resolve_intent(text)
+    assert intent.forbidden is True
+    assert intent.dispatchable is False
 
 
 def test_unmatched_text_falls_back_to_researcher(monkeypatch):

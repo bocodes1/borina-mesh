@@ -119,6 +119,174 @@ def _fleet_status_text() -> str:
     return "\n".join(out)
 
 
+# ── slash commands (registered with setMyCommands so they autocomplete) ──────────
+_CMD_RE = re.compile(r"^\s*/(?P<cmd>help|jobs|fleet|cancel|start)\b(?:@\w+)?\s*(?P<arg>.*)$", re.IGNORECASE | re.DOTALL)
+
+COMMANDS = [
+    {"command": "help", "description": "What Borina can do + how to talk to it"},
+    {"command": "jobs", "description": "Running & recent jobs (with cancel buttons)"},
+    {"command": "fleet", "description": "Agent roster and their states"},
+    {"command": "cancel", "description": "Cancel a running job: /cancel <id>"},
+]
+
+_HELP_TEXT = (
+    "<b>Borina — your delegatable staff.</b>\n"
+    "Just talk to me normally; I route to the right agent and reply with the answer "
+    "(not raw logs).\n\n"
+    "<b>Commands</b>\n"
+    "/jobs — running &amp; recent jobs, with cancel buttons\n"
+    "/fleet — the agent roster and states\n"
+    "/cancel &lt;id&gt; — stop a running job\n\n"
+    "<b>Power use</b>\n"
+    "• <code>trader: …</code> — address one agent directly\n"
+    "• <code>mission: …</code> — decompose across agents and synthesize\n"
+    "• <code>build: …</code> — autonomous code change (ships only when green)\n"
+    "• <code>remember: …</code> / <code>recall: …</code> — the brain\n"
+    "• reply to any report to follow up with the same agent"
+)
+
+
+def _age(dt) -> str:
+    from datetime import datetime
+    if not dt:
+        return "—"
+    secs = int((datetime.utcnow() - dt).total_seconds())
+    if secs < 90:
+        return f"{secs}s"
+    if secs < 5400:
+        return f"{secs // 60}m"
+    return f"{secs // 3600}h"
+
+
+def _jobs_card():
+    from dispatch.cards import Card, Action
+    from db import engine
+    from models import Job, JobStatus
+    from sqlmodel import Session, select
+
+    with Session(engine) as s:
+        running = s.exec(
+            select(Job).where(Job.status == JobStatus.RUNNING).order_by(Job.created_at.desc())
+        ).all()
+        recent = s.exec(select(Job).order_by(Job.created_at.desc())).all()[:6]
+
+    lines, actions = [], []
+    for j in running[:5]:
+        lines.append(f"job{j.id} {j.agent_id} · running · {_age(j.started_at or j.created_at)}")
+        actions.append(Action(label=f"Cancel {j.id}", data=f"cancel:{j.id}"))
+    if recent:
+        lines.append("recent:")
+        for j in recent:
+            if j.status == JobStatus.RUNNING:
+                continue
+            lines.append(f"job{j.id} {j.agent_id} · {j.status.value} · {_age(j.completed_at or j.created_at)} ago")
+    if not lines:
+        lines = ["No jobs yet."]
+    return Card(headline=f"{len(running)} running", lines=lines, actions=actions)
+
+
+def _fleet_card():
+    from dispatch.cards import Card, Action
+    from fleet_roster import list_roster, ACTIVE, PARKED
+
+    roster = list_roster()
+    lines, actions = [], []
+    for r in roster:
+        tag = "" if r["state"] == ACTIVE else f" ({r['state']})"
+        lines.append(f"{r['short']}{tag}")
+        if r["state"] == PARKED:
+            actions.append(Action(label=f"Reactivate {r['short']}", data=f"unpark:{r['id']}"))
+    return Card(headline="Fleet", lines=lines or ["(empty)"], actions=actions)
+
+
+def _do_cancel(job_id: int) -> str:
+    import os
+    import signal
+    from db import engine
+    from models import Job, JobStatus
+    from sqlmodel import Session
+
+    active = (JobStatus.RUNNING, JobStatus.QUEUED, JobStatus.PENDING)
+    with Session(engine) as s:
+        job = s.get(Job, job_id)
+        if not job:
+            return f"No job {job_id}."
+        if job.status not in active:
+            return f"job{job_id} already {job.status.value}."
+        if job.worker_pid:
+            try:
+                os.kill(job.worker_pid, signal.SIGTERM)
+            except (ProcessLookupError, OSError):
+                pass
+        job.status = JobStatus.CANCELLED
+        s.add(job)
+        s.commit()
+    return f"job{job_id} cancelled."
+
+
+def _handle_command(cmd: str, arg: str, chat_id: int) -> dict:
+    from dispatch.cards import send_card
+
+    cmd = cmd.lower()
+    if cmd in ("help", "start"):
+        dispatcher.send_telegram_message(chat_id, _HELP_TEXT)
+        return {"ok": True, "status": "help"}
+    if cmd == "jobs":
+        send_card(chat_id, _jobs_card())
+        return {"ok": True, "status": "jobs"}
+    if cmd == "fleet":
+        send_card(chat_id, _fleet_card())
+        return {"ok": True, "status": "fleet"}
+    if cmd == "cancel":
+        m = re.search(r"\d+", arg or "")
+        if not m:
+            dispatcher.send_telegram_message(chat_id, format_telegram("Usage: /cancel <job id>"))
+            return {"ok": True, "status": "cancel_usage"}
+        dispatcher.send_telegram_message(chat_id, format_telegram(_do_cancel(int(m.group()))))
+        return {"ok": True, "status": "cancel"}
+    return {"ok": True, "status": "unknown_command"}
+
+
+def _handle_callback(data: str, chat_id: int) -> dict:
+    """Route an inline-button callback by its verb prefix. The plan
+    approve/reject verbs keep their existing handler; cancel + unpark are new."""
+    action = data.split(":", 1)[0]
+    if action in ("approve", "reject"):
+        return _handle_plan_callback(data, chat_id)
+    if action == "cancel":
+        _, _, sid = data.partition(":")
+        try:
+            msg = _do_cancel(int(sid))
+        except ValueError:
+            msg = "Bad job id."
+        dispatcher.send_telegram_message(chat_id, format_telegram(msg))
+        return {"ok": True, "status": "cancel", "data": data}
+    if action == "unpark":
+        _, _, aid = data.partition(":")
+        from fleet_roster import set_state, ACTIVE
+        set_state(aid, ACTIVE)
+        dispatcher.send_telegram_message(chat_id, format_telegram(f"Reactivated {aid}."))
+        return {"ok": True, "status": "unpark", "agent": aid}
+    return {"ok": True, "status": "unknown_action"}
+
+
+def set_my_commands() -> bool:
+    """Register slash commands with Telegram so they autocomplete in the client."""
+    token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
+    if not token:
+        return False
+    try:
+        from integrations.base import http_post_json
+        http_post_json(
+            f"https://api.telegram.org/bot{token}/setMyCommands",
+            json={"commands": COMMANDS},
+        )
+        return True
+    except Exception as e:  # noqa: BLE001
+        print(f"[telegram] setMyCommands failed: {e}")
+        return False
+
+
 @router.post("/webhook")
 async def webhook(request: Request):
     # 1. Secret-token header — hard reject (this is the security boundary).
@@ -138,7 +306,7 @@ def process_update(update: dict) -> dict:
         from_id = (cq.get("from") or {}).get("id")
         if from_id is None or from_id not in _allowed_ids():
             return {"ok": True, "status": "ignored"}
-        return _handle_plan_callback(cq.get("data") or "", from_id)
+        return _handle_callback(cq.get("data") or "", from_id)
 
     update_id = update.get("update_id")
     msg = update.get("message") or update.get("edited_message") or {}
@@ -203,6 +371,11 @@ def process_update(update: dict) -> dict:
         ctx = recall(rc.group(1).strip()) or "Nothing in the brain on that yet."
         dispatcher.send_telegram_message(chat_id, format_telegram(ctx, max_lines=20))
         return {"ok": True, "status": "recalled"}
+
+    # 2b0. Slash commands (/help, /jobs, /fleet, /cancel) — answered inline.
+    cmd = _CMD_RE.match(text)
+    if cmd:
+        return _handle_command(cmd.group("cmd"), cmd.group("arg"), chat_id)
 
     # 2b2. Fleet status command — answered inline, nothing dispatched.
     if _STATUS_RE.match(text):

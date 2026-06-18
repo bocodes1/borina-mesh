@@ -52,9 +52,11 @@ class AgentRun(SQLModel, table=True):
 
 
 class AgentConfig(SQLModel, table=True):
-    """Persistent per-agent configuration (schedule, enabled, etc.)."""
+    """Persistent per-agent configuration + the fleet roster source of truth.
+    `state` is the lifecycle: active | parked | retired (see fleet_roster.py)."""
     agent_id: str = Field(primary_key=True)
     enabled: bool = True
+    state: str = Field(default="active", index=True)
     schedule_cron: Optional[str] = None
     last_run_at: Optional[datetime] = None
 

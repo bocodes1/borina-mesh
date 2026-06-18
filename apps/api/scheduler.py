@@ -59,6 +59,23 @@ class SchedulerService:
             self._scheduler.remove_job(job_id)
         self._schedules.pop(agent_id, None)
 
+    def _persist_cron(self, agent_id: str, cron: str) -> None:
+        """Persist a schedule to AgentConfig so it's inspectable and survives a
+        restart (the in-memory APScheduler jobstore does not)."""
+        try:
+            from db import engine
+            from models import AgentConfig
+            from sqlmodel import Session
+            with Session(engine) as s:
+                row = s.get(AgentConfig, agent_id)
+                if row is None:
+                    row = AgentConfig(agent_id=agent_id)
+                row.schedule_cron = cron
+                s.add(row)
+                s.commit()
+        except Exception as e:  # noqa: BLE001
+            print(f"[scheduler] could not persist cron for {agent_id}: {e}")
+
     def list_schedules(self) -> dict[str, str]:
         return dict(self._schedules)
 
@@ -90,13 +107,21 @@ class SchedulerService:
             # default agent yet — spawn via Memory Curator agent when added.
         }
         from agents.base import registry
-        for agent_id, cron in DEFAULT_SCHEDULES.items():
+        # Honor the fleet roster: only ACTIVE agents get scheduled. Parked and
+        # retired agents produce no crons (fixes the cron-noise the user saw).
+        try:
+            from fleet_roster import active_scheduled_agents
+            schedules = active_scheduled_agents(DEFAULT_SCHEDULES)
+        except Exception:  # noqa: BLE001
+            schedules = DEFAULT_SCHEDULES
+        for agent_id, cron in schedules.items():
             if not registry.get(agent_id):
                 continue
             if agent_id in self._schedules:
                 continue
             try:
                 self.set_schedule(agent_id, cron)
+                self._persist_cron(agent_id, cron)
                 print(f"[scheduler] Registered default: {agent_id} @ {cron}")
             except Exception as e:
                 print(f"[scheduler] Failed to register {agent_id}: {e}")

@@ -56,25 +56,61 @@ def _threshold() -> float:
         return 0.6
 
 
-# Verbs/phrases that imply an *action* this system must never auto-perform.
-_FORBIDDEN_PATTERNS = [
-    (r"\b(buy|sell|short|long|purchase)\b", "trade/order"),
-    (r"\b(place|execute|submit)\b.{0,20}\b(order|trade)\b", "order placement"),
-    (r"\b(trade|swap)\b", "trade"),
-    (r"\b(transfer|withdraw|deposit|wire|remit)\b", "fund movement"),
-    (r"\bsend\b.{0,25}(money|funds|usd|eth|btc|crypto|\$|payment)", "send funds"),
-    (r"\b(reply to|respond to|send)\b.{0,20}(email|message|text|dm|him|her|them)\b", "send on Bo's behalf"),
-    (r"\b(delete|remove|wipe|drop)\b", "deletion"),
-    (r"\b(create|add|schedule|book)\b.{0,20}\b(event|meeting|calendar|invite)\b", "calendar-event creation"),
-    (r"\b(grant|change|revoke)\b.{0,20}\b(permission|access|role)\b", "permission change"),
+# Action verbs this system must never auto-perform — but ONLY when they're the
+# actual command intent, not when they appear inside a read-only question.
+# "sell all my ETH now" is forbidden; "what's the sell-off about?" is not.
+_IMPERATIVE_VERBS = (
+    r"(?P<verb>buy|sell|short|long|purchase|trade|swap|transfer|withdraw|deposit|"
+    r"wire|remit|send|delete|remove|wipe|drop|cancel|book|schedule|create|add|"
+    r"place|execute|submit|reply|respond|grant|revoke)"
+)
+# Polite/filler prefixes that can precede an imperative ("please buy…",
+# "can you delete…"). The verb still has to be the action being commanded.
+_POLITE = (
+    r"(?:please|pls|kindly|now|hey|ok|okay|go ahead(?: and)?|can you|could you|"
+    r"would you|will you|i want you to|i'd like you to|i need you to|let'?s)"
+)
+_IMPERATIVE_RE = re.compile(rf"^\s*(?:{_POLITE}\s+)*{_IMPERATIVE_VERBS}\b", re.IGNORECASE)
+
+_VERB_REASON = {
+    "buy": "trade/order", "sell": "trade/order", "short": "trade/order",
+    "long": "trade/order", "purchase": "trade/order", "trade": "trade", "swap": "trade",
+    "transfer": "fund movement", "withdraw": "fund movement", "deposit": "fund movement",
+    "wire": "fund movement", "remit": "fund movement", "send": "send/transfer",
+    "delete": "deletion", "remove": "deletion", "wipe": "deletion", "drop": "deletion",
+    "cancel": "cancellation", "book": "calendar-event creation",
+    "schedule": "calendar-event creation", "create": "creation", "add": "creation",
+    "place": "order placement", "execute": "order placement", "submit": "order placement",
+    "reply": "send on Bo's behalf", "respond": "send on Bo's behalf",
+    "grant": "permission change", "revoke": "permission change",
+}
+
+# High-signal phrases that are an action even mid-sentence (rare in benign asks).
+_HIGH_CONF_PATTERNS = [
+    (r"\b(transfer|wire|send|remit|withdraw|deposit)\b.{0,25}(\$|\busd\b|funds?|money|eth|btc|crypto|wallet|payment)", "fund movement"),
+    (r"\b(place|execute|submit)\b.{0,20}\b(order|trade|position)\b", "order placement"),
+    (r"\b(create|add|schedule|book)\b.{0,20}\b(event|meeting|calendar|invite|appointment)\b", "calendar-event creation"),
+    (r"\b(grant|revoke|change)\b.{0,20}\b(permission|access|role)\b", "permission change"),
+    (r"\b(reply to|respond to)\b.{0,20}(email|message|text|dm)\b", "send on Bo's behalf"),
 ]
 
 
 def detect_forbidden(text: str) -> Optional[str]:
-    low = text.lower()
-    for pattern, reason in _FORBIDDEN_PATTERNS:
-        if re.search(pattern, low):
-            return reason
+    """Refuse only genuine action COMMANDS. A read-only question that merely
+    contains an action word ('what happened when TSLA dropped') passes through.
+    Also catches an imperative after a direct address ('trader: buy 10 NVDA')."""
+    low = text.strip().lower()
+    candidates = [low]
+    colon = re.match(r"^\s*[\w-]+\s*[:,]\s+(.+)$", low, re.DOTALL)
+    if colon:
+        candidates.append(colon.group(1).strip())
+    for cand in candidates:
+        m = _IMPERATIVE_RE.match(cand)
+        if m:
+            return _VERB_REASON.get(m.group("verb"), "action")
+        for pattern, reason in _HIGH_CONF_PATTERNS:
+            if re.search(pattern, cand):
+                return reason
     return None
 
 
@@ -155,9 +191,22 @@ def resolve_intent(text: str) -> Intent:
     if reason:
         return Intent(raw_text=text, forbidden=True, forbidden_reason=reason, confidence=1.0, source="alias")
 
-    # 2. Deterministic alias match.
+    # 2. Deterministic alias match — then enforce the fleet roster: a parked or
+    # retired agent is not auto-routed (a parked one is still reachable by an
+    # explicit "<agent>:" address; a retired one never is).
     alias = _alias_match(text)
-    if alias:
+    if alias and alias.agent:
+        direct = alias.task_type in ("direct", "mission")
+        try:
+            from fleet_roster import is_routable
+            ok = is_routable(alias.agent, direct=direct)
+        except Exception:  # noqa: BLE001 — roster must never break routing
+            ok = True
+        if ok:
+            return alias
+        # Parked/retired specialist → fall through to the general researcher
+        # (or, for a direct address to a retired agent, the same fallback).
+    elif alias:
         return alias
 
     # 3. LLM fallback.
