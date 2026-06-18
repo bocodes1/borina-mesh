@@ -183,7 +183,8 @@ async def run_agent_for_answer(agent_id: str, prompt: str, job_id: int) -> str:
 _PDF_RE = re.compile(
     r"(?:^|\s)/pdf\b"
     r"|\bpdf\b"
-    r"|\bas a (?:pdf|document)\b"
+    r"|\bwrite[\s-]?ups?\b"
+    r"|\bdocuments?\b"
     r"|\bin writing\b"
     r"|\b(?:full|detailed) (?:report|write[\s-]?up)\b",
     re.IGNORECASE,
@@ -191,6 +192,7 @@ _PDF_RE = re.compile(
 
 
 def wants_pdf(text: str) -> bool:
-    """True only when the user EXPLICITLY asks for a PDF (e.g. '/pdf', 'as a pdf',
-    'full report'). A bare 'report' does not trigger it."""
+    """True only when the user EXPLICITLY asks for a written artifact — a PDF,
+    write-up, document, or a 'full/detailed report'. The bare word 'report'
+    ('give me a report on NVDA') does NOT trigger it (that was the misfire)."""
     return bool(_PDF_RE.search(text or ""))

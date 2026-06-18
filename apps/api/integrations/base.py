@@ -91,8 +91,34 @@ def http_post_json(
     headers: Optional[dict] = None,
     timeout: float = DEFAULT_TIMEOUT,
 ) -> Any:
-    """Thin POST→JSON. The only write path in the integrations layer (calendar
-    event creation), gated upstream on an explicit user-initiated action."""
+    """Thin POST→JSON. A write path in the integrations layer (calendar event
+    creation), gated upstream on an explicit user-initiated action."""
     resp = httpx.post(url, json=json, headers=headers, timeout=timeout)
     resp.raise_for_status()
     return resp.json()
+
+
+def http_patch_json(
+    url: str,
+    *,
+    json: Optional[dict] = None,
+    headers: Optional[dict] = None,
+    timeout: float = DEFAULT_TIMEOUT,
+) -> Any:
+    """Thin PATCH→JSON (calendar move/update). Gated upstream on user action."""
+    resp = httpx.patch(url, json=json, headers=headers, timeout=timeout)
+    resp.raise_for_status()
+    return resp.json()
+
+
+def http_delete(
+    url: str,
+    *,
+    headers: Optional[dict] = None,
+    timeout: float = DEFAULT_TIMEOUT,
+) -> int:
+    """Thin DELETE (calendar event removal). Returns the HTTP status code.
+    Gated upstream on an explicit user-initiated action."""
+    resp = httpx.delete(url, headers=headers, timeout=timeout)
+    resp.raise_for_status()
+    return resp.status_code

@@ -33,6 +33,8 @@ def init_db() -> None:
             ("job", "qa_notes", "TEXT"),
             ("job", "telegram_update_id", "INTEGER"),
             ("job", "telegram_chat_id", "INTEGER"),
+            ("job", "priority", "INTEGER DEFAULT 50"),
+            ("agentconfig", "state", "VARCHAR DEFAULT 'active'"),
             ("agentrun", "qa_verdict", "TEXT"),
             ("agentrun", "qa_notes", "TEXT"),
         ]

@@ -375,13 +375,25 @@ def approve_item(item_id: int) -> dict:
         if item.kind == "calendar":
             from integrations import google_calendar
 
-            event = {
-                "summary": payload["summary"],
-                "start": {"dateTime": payload["start"]},
-                "end": {"dateTime": payload["end"]},
-            }
-            # This IS the user-initiated action (Bo approved it).
-            res = google_calendar.create_event(event, user_initiated=True)
+            # op defaults to "create" for back-compat; move/update/delete are the
+            # daily-operator ops. Approval IS the user-initiated action (Bo tapped).
+            op = payload.get("op", "create")
+            if op == "delete":
+                res = google_calendar.delete_event(payload["event_id"], user_initiated=True)
+            elif op == "move":
+                res = google_calendar.move_event(
+                    payload["event_id"], payload["start"], payload["end"], user_initiated=True
+                )
+            elif op == "update":
+                changes = payload.get("changes") or {}
+                res = google_calendar.update_event(payload["event_id"], changes, user_initiated=True)
+            else:  # create
+                event = {
+                    "summary": payload["summary"],
+                    "start": {"dateTime": payload["start"]},
+                    "end": {"dateTime": payload["end"]},
+                }
+                res = google_calendar.create_event(event, user_initiated=True)
             committed = res.connected
             note = res.error
             item.committed_ref = (res.data or {}).get("id") if res.connected else None

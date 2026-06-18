@@ -13,7 +13,9 @@ from typing import Optional
 from .base import (
     IntegrationResult,
     env,
+    http_delete,
     http_get_json,
+    http_patch_json,
     http_post_json,
     not_connected,
     ok,
@@ -115,3 +117,83 @@ def create_event(
         headers={"Authorization": f"Bearer {_access_token()}"},
     )
     return ok(SOURCE, {"id": created.get("id"), "htmlLink": created.get("htmlLink")})
+
+
+@safe(SOURCE)
+def update_event(
+    event_id: str,
+    changes: dict,
+    *,
+    user_initiated: bool = False,
+    calendar_id: str = "primary",
+) -> IntegrationResult:
+    """Patch fields of an existing event (title, description, etc.). Same HARD
+    gate as create: refuses unless `user_initiated` is True (a real approval tap)."""
+    if not user_initiated:
+        return not_connected(SOURCE, "refused: calendar edit requires an explicit user action")
+    if not _oauth_configured() or not _access_token():
+        return not_connected(SOURCE, "Google Calendar not authorized")
+    for key in ("start", "end"):
+        dt_str = (changes.get(key) or {}).get("dateTime")
+        if dt_str:
+            changes[key]["dateTime"] = _normalize_dt(dt_str)
+    updated = http_patch_json(
+        f"{API_BASE}/calendars/{calendar_id}/events/{event_id}",
+        json=changes,
+        headers={"Authorization": f"Bearer {_access_token()}"},
+    )
+    return ok(SOURCE, {"id": updated.get("id"), "htmlLink": updated.get("htmlLink")})
+
+
+@safe(SOURCE)
+def move_event(
+    event_id: str,
+    start: str,
+    end: str,
+    *,
+    user_initiated: bool = False,
+    calendar_id: str = "primary",
+) -> IntegrationResult:
+    """Reschedule an event to a new start/end (the 'reschedule on conflict' op).
+    HARD-gated on user action like every other write."""
+    return update_event(
+        event_id,
+        {"start": {"dateTime": start}, "end": {"dateTime": end}},
+        user_initiated=user_initiated,
+        calendar_id=calendar_id,
+    )
+
+
+@safe(SOURCE)
+def delete_event(
+    event_id: str,
+    *,
+    user_initiated: bool = False,
+    calendar_id: str = "primary",
+) -> IntegrationResult:
+    """Delete an event. HARD-gated on an explicit user action."""
+    if not user_initiated:
+        return not_connected(SOURCE, "refused: calendar deletion requires an explicit user action")
+    if not _oauth_configured() or not _access_token():
+        return not_connected(SOURCE, "Google Calendar not authorized")
+    code = http_delete(
+        f"{API_BASE}/calendars/{calendar_id}/events/{event_id}",
+        headers={"Authorization": f"Bearer {_access_token()}"},
+    )
+    return ok(SOURCE, {"id": event_id, "deleted": True, "status": code})
+
+
+@safe(SOURCE)
+def freebusy(time_min: str, time_max: str, calendar_id: str = "primary") -> IntegrationResult:
+    """Return busy intervals [{start,end}] in the window — read-only, no gate.
+    Used by the daily operator to find a real free gap instead of a fixed block."""
+    if not _oauth_configured() or not _access_token():
+        return not_connected(SOURCE, "Google Calendar not authorized")
+    raw = http_post_json(
+        f"{API_BASE}/freeBusy",
+        json={"timeMin": time_min, "timeMax": time_max, "items": [{"id": calendar_id}]},
+        headers={"Authorization": f"Bearer {_access_token()}"},
+    )
+    cals = (raw.get("calendars") or {}) if isinstance(raw, dict) else {}
+    busy = (cals.get(calendar_id) or {}).get("busy", [])
+    return ok(SOURCE, [{"start": b.get("start"), "end": b.get("end")} for b in busy])
