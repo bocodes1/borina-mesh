@@ -59,9 +59,12 @@ def _threshold() -> float:
 # Action verbs this system must never auto-perform — but ONLY when they're the
 # actual command intent, not when they appear inside a read-only question.
 # "sell all my ETH now" is forbidden; "what's the sell-off about?" is not.
+# NOTE: calendar verbs (add/create/schedule/book) are deliberately NOT here —
+# a calendar request is routed to a propose-then-approve Card (the tap is the
+# user-initiated write), so it must not be refused outright.
 _IMPERATIVE_VERBS = (
     r"(?P<verb>buy|sell|short|long|purchase|trade|swap|transfer|withdraw|deposit|"
-    r"wire|remit|send|delete|remove|wipe|drop|cancel|book|schedule|create|add|"
+    r"wire|remit|send|delete|remove|wipe|drop|"
     r"place|execute|submit|reply|respond|grant|revoke)"
 )
 # Polite/filler prefixes that can precede an imperative ("please buy…",
@@ -89,7 +92,6 @@ _VERB_REASON = {
 _HIGH_CONF_PATTERNS = [
     (r"\b(transfer|wire|send|remit|withdraw|deposit)\b.{0,25}(\$|\busd\b|funds?|money|eth|btc|crypto|wallet|payment)", "fund movement"),
     (r"\b(place|execute|submit)\b.{0,20}\b(order|trade|position)\b", "order placement"),
-    (r"\b(create|add|schedule|book)\b.{0,20}\b(event|meeting|calendar|invite|appointment)\b", "calendar-event creation"),
     (r"\b(grant|revoke|change)\b.{0,20}\b(permission|access|role)\b", "permission change"),
     (r"\b(reply to|respond to)\b.{0,20}(email|message|text|dm)\b", "send on Bo's behalf"),
 ]

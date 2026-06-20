@@ -40,7 +40,6 @@ def test_alias_table(text, expected_agent):
         "transfer $500 to my other wallet",
         "withdraw my funds",
         "delete yesterday's report",
-        "create a calendar event for 3pm",
         "reply to that email for me",
     ],
 )
@@ -49,6 +48,22 @@ def test_forbidden_actions_refused(text):
     assert intent.forbidden is True
     assert intent.dispatchable is False
     assert intent.forbidden_reason
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "create a calendar event for 3pm",
+        "add it to my calendar",
+        "schedule a dentist appointment tomorrow",
+        "put the photo shoot on my calendar",
+    ],
+)
+def test_calendar_requests_are_not_forbidden(text):
+    # Calendar adds now route to a propose-then-approve Card (the tap is the
+    # user-initiated write), so they must NOT be refused outright.
+    intent = resolve_intent(text)
+    assert intent.forbidden is False
 
 
 @pytest.mark.parametrize(

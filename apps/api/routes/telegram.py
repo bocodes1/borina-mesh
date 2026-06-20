@@ -60,16 +60,23 @@ def _handle_plan_callback(data: str, chat_id: int) -> dict:
     try:
         if action == "approve":
             res = approve_item(item_id)
-            msg = "Approved." if res.get("committed") else "Calendar not connected — still pending."
+            if res.get("already_decided"):
+                return {"ok": True, "status": "approve", "item_id": item_id, "toast": "Already done"}
+            if res.get("committed"):
+                msg, toast = "Added to your calendar.", "Approved ✓"
+            else:
+                msg, toast = "Calendar not connected — kept it pending so you can retry.", "Pending"
         elif action == "reject":
-            reject_item(item_id)
-            msg = "Rejected."
+            res = reject_item(item_id)
+            if isinstance(res, dict) and res.get("already_decided"):
+                return {"ok": True, "status": "reject", "item_id": item_id, "toast": "Already done"}
+            msg, toast = "Skipped.", "Skipped"
         else:
-            return {"ok": True, "status": "unknown_action"}
+            return {"ok": True, "status": "unknown_action", "toast": ""}
     except KeyError:
-        return {"ok": True, "status": "not_found"}
+        return {"ok": True, "status": "not_found", "toast": "Not found"}
     dispatcher.send_telegram_message(chat_id, format_telegram(msg))
-    return {"ok": True, "status": action, "item_id": item_id}
+    return {"ok": True, "status": action, "item_id": item_id, "toast": toast}
 
 
 _STATUS_RE = re.compile(r"^\s*(status|agents|fleet)\s*\??\s*$", re.IGNORECASE)
@@ -352,14 +359,16 @@ def _handle_operator_callback(data: str, chat_id: int) -> dict:
                     committed += 1
             except KeyError:
                 pass
-        if committed == len(items) and items:
-            msg = f"Approved {committed} calendar change(s)."
-        elif items:
-            msg = f"Approved {committed}/{len(items)} — calendar not connected for the rest, still pending."
+        if not items:
+            # Nothing to do (e.g. a repeated tap) — toast only, no chat spam.
+            return {"ok": True, "status": "op_approveall", "committed": 0, "toast": "Nothing to approve"}
+        if committed == len(items):
+            msg, toast = f"Approved {committed} calendar change(s).", "Approved ✓"
         else:
-            msg = "Nothing left to approve."
+            msg, toast = (f"Approved {committed}/{len(items)} — calendar not connected for the rest, "
+                          f"still pending."), "Partly approved"
         dispatcher.send_telegram_message(chat_id, format_telegram(msg))
-        return {"ok": True, "status": "op_approveall", "committed": committed}
+        return {"ok": True, "status": "op_approveall", "committed": committed, "toast": toast}
 
     if verb == "skip":
         items = [i for i in get_plan(arg).get("items", [])
@@ -369,8 +378,10 @@ def _handle_operator_callback(data: str, chat_id: int) -> dict:
                 reject_item(it["id"])
             except KeyError:
                 pass
+        if not items:
+            return {"ok": True, "status": "op_skip", "skipped": 0, "toast": "Nothing to skip"}
         dispatcher.send_telegram_message(chat_id, format_telegram(f"Skipped {len(items)} change(s)."))
-        return {"ok": True, "status": "op_skip", "skipped": len(items)}
+        return {"ok": True, "status": "op_skip", "skipped": len(items), "toast": "Skipped"}
 
     if verb == "edit":
         from dispatch.cards import Card, Action, send_card
@@ -386,6 +397,18 @@ def _handle_operator_callback(data: str, chat_id: int) -> dict:
         return {"ok": True, "status": "op_edit", "item_id": item_id}
 
     return {"ok": True, "status": "op_unknown"}
+
+
+def _run_converse(text: str, chat_id: int, heard: str = "") -> None:
+    """Background worker for the conversational lane: quick reply + optional
+    calendar approval card. Errors degrade to a friendly line, never a stack trace."""
+    from dispatch import converse as cv
+    try:
+        if heard:
+            dispatcher.send_telegram_message(chat_id, format_telegram(heard.strip()))
+        cv.handle_converse(text, chat_id)
+    except Exception:  # noqa: BLE001
+        dispatcher.send_telegram_message(chat_id, format_telegram("Hmm, hiccuped on that one — try again?"))
 
 
 def set_my_commands() -> bool:
@@ -424,7 +447,11 @@ def process_update(update: dict) -> dict:
         from_id = (cq.get("from") or {}).get("id")
         if from_id is None or from_id not in _allowed_ids():
             return {"ok": True, "status": "ignored"}
-        return _handle_callback(cq.get("data") or "", from_id)
+        res = _handle_callback(cq.get("data") or "", from_id)
+        # Always ack the tap (stops the spinner) + show a small toast instead of
+        # spamming the chat with a message on every press.
+        dispatcher.answer_callback_query(cq.get("id"), res.get("toast", ""))
+        return res
 
     update_id = update.get("update_id")
     msg = update.get("message") or update.get("edited_message") or {}
@@ -572,6 +599,15 @@ def process_update(update: dict) -> dict:
             chat_id, format_telegram(f"{heard}I could not confidently route that - could you rephrase?")
         )
         return {"ok": True, "status": "clarify"}
+
+    # Conversational lane: a casual message that no specialist claimed gets a
+    # quick LLM reply (+ an approval card if it mentions a calendar event) —
+    # NOT the heavy "dispatching researcher → report" ceremony. Run in a daemon
+    # thread so the slow claude call never blocks the poller.
+    if intent.source == "fallback":
+        import threading
+        threading.Thread(target=_run_converse, args=(text, chat_id, heard), daemon=True).start()
+        return {"ok": True, "status": "converse_started"}
 
     # Enqueue (idempotent by update_id), ack, return fast. Never await the run.
     job = enqueue_job(text, intent.agent, update_id, chat_id)

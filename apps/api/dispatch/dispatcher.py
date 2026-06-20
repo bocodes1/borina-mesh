@@ -71,6 +71,26 @@ def send_telegram_message(chat_id: int, text: str, reply_markup: Optional[dict] 
         return None
 
 
+def answer_callback_query(callback_query_id: Optional[str], text: str = "") -> None:
+    """Acknowledge an inline-button tap — stops the client's loading spinner and
+    shows a small toast. Lets us give feedback WITHOUT spamming the chat with a
+    new message on every tap."""
+    if not callback_query_id:
+        return
+    from integrations.base import http_post_json
+
+    token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
+    if not token:
+        return
+    try:
+        http_post_json(
+            f"https://api.telegram.org/bot{token}/answerCallbackQuery",
+            json={"callback_query_id": callback_query_id, "text": text[:200]},
+        )
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def send_telegram_document(chat_id: int, file_path: Path, caption: str) -> None:
     # Document upload is multipart; in the live deploy this uses sendDocument.
     # Kept as a separate effect so tests assert it was called without uploading.
