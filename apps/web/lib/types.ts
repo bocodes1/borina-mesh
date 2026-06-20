@@ -10,6 +10,7 @@ export interface Agent {
   qa_verdict?: string | null;
   status?: "idle" | "running" | "qa_flagged" | "error";
   current_task?: string | null;
+  state?: "active" | "parked" | "retired";  // lean-fleet lifecycle (L0)
 }
 
 export interface Job {

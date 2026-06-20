@@ -12,6 +12,7 @@ router = APIRouter(prefix="/agents", tags=["agents"])
 @router.get("")
 async def list_agents():
     """List all registered agents with live status."""
+    from fleet_roster import get_state
     agents = []
     for a in registry.list():
         d = a.to_dict()
@@ -19,6 +20,9 @@ async def list_agents():
         d["status"] = status_info["status"]
         d["current_task"] = status_info["current_task"]
         d["last_run_at"] = status_info["last_run_at"]
+        # Lean-fleet lifecycle state (active | parked | retired) so the UI can
+        # reflect the roster instead of showing every registered agent as live.
+        d["state"] = get_state(a.id)
         agents.append(d)
     return agents
 
