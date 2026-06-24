@@ -96,10 +96,22 @@ async def run_phase(phase: str, day: Optional[str] = None, *, send: bool = True)
         approved = sum(1 for i in items if i.get("status") == "approved")
         rejected = sum(1 for i in items if i.get("status") == "rejected")
         pending = sum(1 for i in items if i.get("status") == "proposed")
+        # Nightly learner: refresh Bo's durable profile from today's signals.
+        # Best-effort — a learner failure must never break the recap.
+        learn_line = "Profile unchanged."
+        try:
+            from operator_brain import update_profile
+            res = await update_profile(day)
+            if res.get("written"):
+                learn_line = f"Profile updated — {res.get('active_threads', 0)} active thread(s)."
+        except Exception as e:  # noqa: BLE001
+            learn_line = "Profile update skipped (learner error)."
+            print(f"[operator] eod learner error: {e}")
         card = Card(
             headline=f"EOD recap — {day}",
             lines=[
                 f"approved {approved} · skipped {rejected} · still pending {pending}",
+                learn_line,
                 "Tomorrow's plan stages in the morning.",
             ],
         )

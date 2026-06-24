@@ -97,9 +97,15 @@ async def test_morning_phase_builds_approval_card(monkeypatch):
 async def test_eod_phase_recaps(monkeypatch):
     import daily_operator as op
     import planner
+    import operator_brain
     monkeypatch.setattr(op, "_chat_id", lambda: None)
     monkeypatch.setattr(planner, "get_plan", lambda day=None: {"items": [
         {"status": "approved"}, {"status": "rejected"}, {"status": "proposed"}]})
+
+    async def fake_update(day=None):  # keep hermetic — no real agent run
+        return {"written": False, "active_threads": 0, "trimmed": 0}
+    monkeypatch.setattr(operator_brain, "update_profile", fake_update)
+
     card = await op.run_phase("eod", day="2026-06-18", send=False)
     assert "EOD recap" in card.headline
     assert "approved 1" in card.lines[0]
@@ -120,3 +126,38 @@ def test_op_approveall_callback(monkeypatch):
     monkeypatch.setattr(planner, "approve_item", lambda i: approved.append(i) or {"committed": True})
     res = tg._handle_operator_callback("op:approveall:2026-06-18", 99)
     assert res["committed"] == 2 and approved == [11, 12]
+
+
+@pytest.mark.asyncio
+async def test_eod_phase_updates_profile(monkeypatch):
+    import daily_operator as op
+    import planner
+    import operator_brain
+    monkeypatch.setattr(op, "_chat_id", lambda: None)
+    monkeypatch.setattr(planner, "get_plan", lambda day=None: {"items": [
+        {"status": "approved"}, {"status": "proposed"}]})
+
+    async def fake_update(day=None):
+        return {"written": True, "active_threads": 3, "trimmed": 0}
+    monkeypatch.setattr(operator_brain, "update_profile", fake_update)
+
+    card = await op.run_phase("eod", day="2026-06-24", send=False)
+    assert "EOD recap" in card.headline
+    assert any("Profile updated — 3 active thread" in l for l in card.lines)
+
+
+@pytest.mark.asyncio
+async def test_eod_phase_survives_learner_error(monkeypatch):
+    import daily_operator as op
+    import planner
+    import operator_brain
+    monkeypatch.setattr(op, "_chat_id", lambda: None)
+    monkeypatch.setattr(planner, "get_plan", lambda day=None: {"items": []})
+
+    async def boom(day=None):
+        raise RuntimeError("agent down")
+    monkeypatch.setattr(operator_brain, "update_profile", boom)
+
+    card = await op.run_phase("eod", day="2026-06-24", send=False)
+    assert "EOD recap" in card.headline  # recap still produced
+    assert any("Profile update skipped" in l for l in card.lines)
