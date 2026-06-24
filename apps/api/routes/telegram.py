@@ -481,6 +481,15 @@ def process_update(update: dict) -> dict:
         text = transcript
         heard = f'Heard: "{transcript[:160]}". '
 
+    # Log the inbound message (post allow-list) for the nightly learner. Fail-open:
+    # done here so voice transcripts are captured too, and only for allowed senders.
+    if text:
+        try:
+            from conversation_log import log_message
+            log_message(chat_id, "user", text)
+        except Exception:  # noqa: BLE001
+            pass
+
     # 2b1. Builder: "build: X" / "ship: X" — autonomous code change in a
     # detached worktree runner. The generic forbidden gate is deliberately not
     # applied to build texts (a code task mentioning "delete" is not a live

@@ -133,3 +133,14 @@ class TelegramThread(SQLModel, table=True):
     job_id: Optional[int] = None
     prompt: str = ""
     created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class ConversationLog(SQLModel, table=True):
+    """Durable log of Telegram messages (both directions) so the nightly learner
+    (operator_brain) can mine what Bo actually talked about. Written fail-open —
+    a logging failure never blocks dispatch. role: "user" | "borina"."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    chat_id: int = Field(index=True)
+    role: str
+    text: str
+    created_at: datetime = Field(default_factory=datetime.utcnow, index=True)

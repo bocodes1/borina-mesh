@@ -106,48 +106,6 @@ def _build_proposals(day: str) -> list[dict]:
     return proposals
 
 
-# ── live agent path (Phase 4 §2) ─────────────────────────────────────────────
-# The planner agent only ever produces TEXT (a JSON proposal list) that is
-# staged as PlanItem rows — the no-autonomous-write rule is untouched: the only
-# write path remains approve_item, invoked by Bo.
-
-PLANNER_TASK_PROMPT = """<task name="daily_plan">
-You are Bo's chief-of-staff planner. Draft today's ({day}) plan as STAGED PROPOSALS.
-You never write to the calendar or task list — you only propose; Bo approves each item.
-
-Context:
-- Calendar events today: {events}
-- Open tasks: {tasks}
-- Brief TL;DR: {tldr}
-- Brief focus suggestions: {tasks_focus}
-- Bo's recent Obsidian daily notes (his actual current work — prefer FRESH items
-  from the newest note; SKIP long-running items that recur across days, he knows
-  about those already): {obsidian}
-
-Propose at most 8 items: a 15-min prep buffer before each real meeting, one protected
-deep-work focus block, and the 2-4 highest-leverage tasks for today. Be specific to the
-context above; no generic filler.
-
-Output ONLY a JSON array (no prose, no code fences). Each element:
-  {{"kind": "task" | "calendar", "title": "...", "rationale": "...", "payload": {{...}}}}
-- kind=calendar payload: {{"summary": "...", "start": "ISO-8601", "end": "ISO-8601"}}
-- kind=task payload: {{"title": "...", "tag": "work|personal|borina", "priority": "high|medium|low"}}
-
-ALSO save the exact same JSON array to proposals/{day}.json under your working
-directory (create the folder if needed) — that file is the canonical handoff.
-</task>"""
-
-
-def _agent_proposals_file(day: str) -> Path:
-    """Where the planner agent saves its JSON proposals inside its workdir.
-    Reading this beats scraping the tmux pane (which wraps long JSON strings)."""
-    from agents.runner_v2 import AGENT_REGISTRY, _workdir_root
-
-    entry = AGENT_REGISTRY.get("planner", {})
-    workdir = Path(entry.get("workdir") or (_workdir_root() / "planner"))
-    return workdir / "proposals" / f"{day}.json"
-
-
 async def _call_agent(prompt: str) -> str:
     from agents.runner_v2 import run_agent_task
 
@@ -155,28 +113,70 @@ async def _call_agent(prompt: str) -> str:
     return getattr(result, "output", None) or ""
 
 
-def _parse_agent_proposals(text: str) -> Optional[list[dict]]:
-    """Strict-ish parse of the agent's JSON proposal list. Invalid items are
-    dropped; returns None unless at least one valid proposal survives."""
-    if not text:
-        return None
-    m = re.search(r"\[.*\]", text, re.DOTALL)
-    if not m:
-        return None
+# ── live agent path: layered plan ────────────────────────────────────────────
+# The planner agent produces TEXT only (a JSON object) staged as PlanItem rows —
+# the no-autonomous-write rule is untouched: the only write path remains
+# approve_item, invoked by Bo. The agent returns {brief, threads, items}; the
+# calendar `items` ARE Bo's time-blocked agenda. (Reuses _call_agent above.)
+
+PLANNER_PLAN_PROMPT = """<task name="daily_plan">
+You are Bo's chief-of-staff planner. Draft today's ({day}) plan as STAGED PROPOSALS.
+You never write to the calendar or task list — you only propose; Bo approves each item.
+
+Bo's durable profile (what he's working on + how he likes his days):
+{profile}
+
+Today's context:
+- Calendar events: {events}
+- Open tasks: {tasks}
+- Brief TL;DR: {tldr}
+- Brief focus suggestions: {tasks_focus}
+- Recent Obsidian daily notes (prefer FRESH items; SKIP long-running recurring ones): {obsidian}
+
+Produce a LAYERED plan. Output ONLY a JSON object (no prose, no code fences):
+{{
+  "brief": "<2-4 sentence narrative: where Bo is, what today is for>",
+  "threads": [{{"name": "...", "today": "<concrete next action today>", "why": "..."}}],
+  "items": [ ... ]
+}}
+Each element of "items":
+  {{"kind": "task" | "calendar", "title": "...", "rationale": "...", "payload": {{...}}}}
+- kind=calendar payload: {{"summary": "...", "start": "ISO-8601", "end": "ISO-8601"}}
+- kind=task payload: {{"title": "...", "tag": "work|personal|borina", "priority": "high|medium|low"}}
+
+The kind=calendar items ARE Bo's time-blocked agenda: lay out the working day as
+calendar blocks — a 15-min prep buffer before each real meeting, protected
+deep-work block(s), and a timed slot for each top task — with real start/end times
+that don't overlap existing events. At most 10 items total. Ground everything in
+the profile + context above; no generic filler.
+
+ALSO save this exact JSON object to plan/{day}.json under your working directory
+(create the folder if needed) — that file is the canonical handoff.
+</task>"""
+
+
+def _safe_profile() -> str:
+    """Bo's durable profile for the prompt; never raises (empty/no-vault → note)."""
     try:
-        raw = json.loads(m.group(0))
-    except Exception:
-        # A tmux pane wraps long lines, leaving raw newlines inside JSON string
-        # literals. Newlines between tokens are insignificant, so collapsing
-        # them is structurally safe and repairs the wrapped strings.
-        try:
-            raw = json.loads(re.sub(r"\n\s*", " ", m.group(0)))
-        except Exception:
-            return None
-    if not isinstance(raw, list):
-        return None
+        from operator_brain import read_profile
+        return read_profile()[:3000]
+    except Exception:  # noqa: BLE001
+        return "(no profile yet)"
+
+
+def _agent_plan_file(day: str) -> Path:
+    """Where the planner agent saves its JSON plan object inside its workdir."""
+    from agents.runner_v2 import AGENT_REGISTRY, _workdir_root
+
+    entry = AGENT_REGISTRY.get("planner", {})
+    workdir = Path(entry.get("workdir") or (_workdir_root() / "planner"))
+    return workdir / "plan" / f"{day}.json"
+
+
+def _validate_items(raw_items) -> list[dict]:
+    """Validate/normalize the proposal items. Drops invalid; caps at 8."""
     valid: list[dict] = []
-    for it in raw[:12]:
+    for it in (raw_items or [])[:12]:
         if not isinstance(it, dict):
             continue
         kind = it.get("kind")
@@ -202,7 +202,60 @@ def _parse_agent_proposals(text: str) -> Optional[list[dict]]:
             "rationale": str(it.get("rationale") or "")[:200],
             "payload": payload,
         })
-    return valid[:8] or None
+    return valid[:8]
+
+
+def _parse_agent_plan(text: str) -> Optional[dict]:
+    """Parse the agent's {brief, threads, items} object. Returns None unless at
+    least one valid item survives (so callers fall back to heuristics)."""
+    if not text:
+        return None
+    m = re.search(r"\{.*\}", text, re.DOTALL)
+    if not m:
+        return None
+    blob = m.group(0)
+    try:
+        raw = json.loads(blob)
+    except Exception:
+        # tmux pane wrap leaves raw newlines inside JSON string literals;
+        # collapsing inter-token whitespace repairs the wrapped strings.
+        try:
+            raw = json.loads(re.sub(r"\n\s*", " ", blob))
+        except Exception:
+            return None
+    if not isinstance(raw, dict):
+        return None
+    items = _validate_items(raw.get("items") if isinstance(raw.get("items"), list) else [])
+    if not items:
+        return None
+    threads: list[dict] = []
+    for t in (raw.get("threads") or [])[:8]:
+        if isinstance(t, dict) and (t.get("name") or t.get("today")):
+            threads.append({
+                "name": str(t.get("name") or "")[:80],
+                "today": str(t.get("today") or "")[:160],
+                "why": str(t.get("why") or "")[:160],
+            })
+    return {"brief": str(raw.get("brief") or "")[:600], "threads": threads, "items": items}
+
+
+async def _run_agent_plan(day: str) -> Optional[dict]:
+    try:
+        prompt = PLANNER_PLAN_PROMPT.format(**_agent_context(day))
+        output = await _call_agent(prompt)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[planner] agent path failed, using heuristics: {exc}")
+        return None
+    # Preferred handoff: the file the agent wrote; pane capture as fallback.
+    try:
+        f = _agent_plan_file(day)
+        if f.exists():
+            parsed = _parse_agent_plan(f.read_text())
+            if parsed:
+                return parsed
+    except Exception as exc:  # noqa: BLE001
+        print(f"[planner] workdir plan unreadable: {exc}")
+    return _parse_agent_plan(output)
 
 
 def _recent_daily_notes(limit: int = 2, max_chars: int = 4000) -> str:
@@ -244,36 +297,29 @@ def _agent_context(day: str) -> dict:
         "tldr": brief.get("tldr") or "no brief yet",
         "tasks_focus": brief.get("tasks_focus") or "none",
         "obsidian": _recent_daily_notes() or "no vault notes",
+        "profile": _safe_profile(),
     }
 
 
-async def _run_agent_proposals(day: str) -> Optional[list[dict]]:
-    try:
-        prompt = PLANNER_TASK_PROMPT.format(**_agent_context(day))
-        output = await _call_agent(prompt)
-    except Exception as exc:  # noqa: BLE001
-        print(f"[planner] agent path failed, using heuristics: {exc}")
-        return None
-    # Preferred handoff: the file the agent wrote; pane capture as fallback.
-    try:
-        f = _agent_proposals_file(day)
-        if f.exists():
-            parsed = _parse_agent_proposals(f.read_text())
-            if parsed:
-                return parsed
-    except Exception as exc:  # noqa: BLE001
-        print(f"[planner] workdir proposals unreadable: {exc}")
-    return _parse_agent_proposals(output)
-
-
-def _render_plan_md(day: str, proposals: list[dict], source: str = "fallback") -> str:
+def _render_plan_md(day: str, proposals: list[dict], source: str = "fallback",
+                    brief: str = "", threads: Optional[list[dict]] = None) -> str:
+    threads = threads or []
     tasks = [p for p in proposals if p["kind"] == "task"]
     cals = [p for p in proposals if p["kind"] == "calendar"]
     origin = "Proposed live by the planner agent." if source == "agent" else "Proposed by fallback heuristics (no LLM)."
-    lines = [f"# Daily plan — {day}", "", f"_{origin}_", "", "## Tasks"]
-    lines += [f"- {t['title']}" for t in tasks] or ["- (none)"]
-    lines += ["", "## Proposed calendar changes (require approval)"]
+    lines = [f"# Daily plan — {day}", "", f"_{origin}_", ""]
+    if brief:
+        lines += ["## Brief", "", brief, ""]
+    if threads:
+        lines += ["## Threads", ""]
+        for t in threads:
+            why = f" — _{t['why']}_" if t.get("why") else ""
+            lines.append(f"- **{t.get('name', '')}**: {t.get('today', '')}{why}")
+        lines += [""]
+    lines += ["## Agenda (proposed calendar blocks — require approval)", ""]
     lines += [f"- {c['title']} — {c['rationale']}" for c in cals] or ["- (none)"]
+    lines += ["", "## Tasks", ""]
+    lines += [f"- {t['title']}" for t in tasks] or ["- (none)"]
     lines += ["", "_Nothing is written to the calendar until you approve each item._"]
     return "\n".join(lines) + "\n"
 
@@ -282,6 +328,8 @@ def generate_plan(
     day: Optional[str] = None,
     proposals: Optional[list[dict]] = None,
     source: str = "fallback",
+    brief: str = "",
+    threads: Optional[list[dict]] = None,
 ) -> dict:
     """Build today's proposal. Clears prior *proposed* items for the day (keeps
     approved/rejected history), creates fresh PlanItems, writes daily-plan.md.
@@ -310,7 +358,7 @@ def generate_plan(
 
     path = _plan_path(day)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(_render_plan_md(day, proposals, source))
+    path.write_text(_render_plan_md(day, proposals, source, brief=brief, threads=threads or []))
 
     return {
         "day": day,
@@ -319,16 +367,21 @@ def generate_plan(
         "task_count": sum(1 for p in proposals if p["kind"] == "task"),
         "calendar_count": sum(1 for p in proposals if p["kind"] == "calendar"),
         "path": str(path),
+        "brief": brief,
+        "threads": threads or [],
     }
 
 
 async def generate_plan_with_agent(day: Optional[str] = None) -> dict:
-    """Live path: have the planner agent draft the proposals; fall back to the
+    """Live path: have the planner agent draft the layered plan; fall back to the
     deterministic heuristics. Staging-only either way — no calendar writes."""
     day = day or today_str()
-    agent_proposals = await _run_agent_proposals(day)
-    if agent_proposals:
-        return generate_plan(day, proposals=agent_proposals, source="agent")
+    plan = await _run_agent_plan(day)
+    if plan and plan.get("items"):
+        return generate_plan(
+            day, proposals=plan["items"], source="agent",
+            brief=plan.get("brief", ""), threads=plan.get("threads") or [],
+        )
     return generate_plan(day)
 
 
@@ -447,3 +500,24 @@ def plan_digest_text(day: Optional[str] = None) -> str:
     n_cal = sum(1 for i in proposed if i["kind"] == "calendar")
     host = os.getenv("MESH_PUBLIC_HOST", "").strip() or "localhost:3000"
     return f"Plan ready: {n_task} tasks, {n_cal} proposed calendar changes. Approve in /daily. http://{host}/daily"
+
+
+def plan_narrative_text(day: str, summary: dict) -> str:
+    """The morning Telegram narrative: brief → threads → agenda. Trimmed for chat;
+    the full layered document lives in daily-plan.md."""
+    brief = (summary or {}).get("brief") or ""
+    threads = (summary or {}).get("threads") or []
+    plan = get_plan(day)
+    cals = plan.get("calendar", [])
+    lines = [f"Plan for {day}"]
+    if brief:
+        lines += ["", brief]
+    if threads:
+        lines += ["", "Threads:"]
+        for t in threads[:5]:
+            lines.append(f"• {t.get('name', '')}: {t.get('today', '')}")
+    if cals:
+        lines += ["", "Agenda:"]
+        for c in cals[:10]:
+            lines.append(f"• {c['title']}")
+    return "\n".join(lines)

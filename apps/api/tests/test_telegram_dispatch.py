@@ -96,3 +96,39 @@ def test_forbidden_action_refused_no_dispatch(monkeypatch):
     r = client.post("/api/telegram/webhook", json=_update(BO, "sell all my NVDA shares"), headers=HEADERS)
     assert r.status_code == 200 and r.json()["status"] == "refused"
     assert calls == []
+
+
+def test_inbound_logged_for_allowed_sender(monkeypatch):
+    from datetime import date
+    from sqlmodel import select
+    import conversation_log as cl
+    from db import session_scope
+    from models import ConversationLog
+
+    with session_scope() as s:  # clean slate
+        for r in s.exec(select(ConversationLog)).all():
+            s.delete(r)
+        s.commit()
+    monkeypatch.setenv("TELEGRAM_ALLOWED_CHAT_IDS", str(BO))
+
+    tg.process_update({"update_id": 1, "message": {"chat": {"id": BO},
+                                                   "text": "/help", "message_id": 9}})
+    rows = cl.recent_for_day(date.today().isoformat())
+    assert any(r["role"] == "user" and r["text"] == "/help" for r in rows)
+
+
+def test_inbound_not_logged_for_disallowed_sender(monkeypatch):
+    from datetime import date
+    from sqlmodel import select
+    import conversation_log as cl
+    from db import session_scope
+    from models import ConversationLog
+
+    with session_scope() as s:
+        for r in s.exec(select(ConversationLog)).all():
+            s.delete(r)
+        s.commit()
+    monkeypatch.setenv("TELEGRAM_ALLOWED_CHAT_IDS", str(BO))
+    tg.process_update({"update_id": 2, "message": {"chat": {"id": 999},
+                                                   "text": "intruder", "message_id": 10}})
+    assert cl.recent_for_day(date.today().isoformat()) == []
