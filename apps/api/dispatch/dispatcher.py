@@ -53,6 +53,11 @@ def send_telegram_message(chat_id: int, text: str, reply_markup: Optional[dict] 
     token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
     if not token:
         return None
+    try:  # mirror Borina's side into the learner's signal (fail-open)
+        from conversation_log import log_message
+        log_message(chat_id, "borina", text)
+    except Exception:  # noqa: BLE001
+        pass
     payload = {
         "chat_id": chat_id,
         "text": text,
