@@ -205,6 +205,151 @@ def _parse_agent_proposals(text: str) -> Optional[list[dict]]:
     return valid[:8] or None
 
 
+# ── live agent path: layered plan ────────────────────────────────────────────
+# The planner agent produces TEXT only (a JSON object) staged as PlanItem rows —
+# the no-autonomous-write rule is untouched: the only write path remains
+# approve_item, invoked by Bo. The agent returns {brief, threads, items}; the
+# calendar `items` ARE Bo's time-blocked agenda. (Reuses _call_agent above.)
+
+PLANNER_PLAN_PROMPT = """<task name="daily_plan">
+You are Bo's chief-of-staff planner. Draft today's ({day}) plan as STAGED PROPOSALS.
+You never write to the calendar or task list — you only propose; Bo approves each item.
+
+Bo's durable profile (what he's working on + how he likes his days):
+{profile}
+
+Today's context:
+- Calendar events: {events}
+- Open tasks: {tasks}
+- Brief TL;DR: {tldr}
+- Brief focus suggestions: {tasks_focus}
+- Recent Obsidian daily notes (prefer FRESH items; SKIP long-running recurring ones): {obsidian}
+
+Produce a LAYERED plan. Output ONLY a JSON object (no prose, no code fences):
+{{
+  "brief": "<2-4 sentence narrative: where Bo is, what today is for>",
+  "threads": [{{"name": "...", "today": "<concrete next action today>", "why": "..."}}],
+  "items": [ ... ]
+}}
+Each element of "items":
+  {{"kind": "task" | "calendar", "title": "...", "rationale": "...", "payload": {{...}}}}
+- kind=calendar payload: {{"summary": "...", "start": "ISO-8601", "end": "ISO-8601"}}
+- kind=task payload: {{"title": "...", "tag": "work|personal|borina", "priority": "high|medium|low"}}
+
+The kind=calendar items ARE Bo's time-blocked agenda: lay out the working day as
+calendar blocks — a 15-min prep buffer before each real meeting, protected
+deep-work block(s), and a timed slot for each top task — with real start/end times
+that don't overlap existing events. At most 10 items total. Ground everything in
+the profile + context above; no generic filler.
+
+ALSO save this exact JSON object to plan/{day}.json under your working directory
+(create the folder if needed) — that file is the canonical handoff.
+</task>"""
+
+
+def _safe_profile() -> str:
+    """Bo's durable profile for the prompt; never raises (empty/no-vault → note)."""
+    try:
+        from operator_brain import read_profile
+        return read_profile()[:3000]
+    except Exception:  # noqa: BLE001
+        return "(no profile yet)"
+
+
+def _agent_plan_file(day: str) -> Path:
+    """Where the planner agent saves its JSON plan object inside its workdir."""
+    from agents.runner_v2 import AGENT_REGISTRY, _workdir_root
+
+    entry = AGENT_REGISTRY.get("planner", {})
+    workdir = Path(entry.get("workdir") or (_workdir_root() / "planner"))
+    return workdir / "plan" / f"{day}.json"
+
+
+def _validate_items(raw_items) -> list[dict]:
+    """Validate/normalize the proposal items. Drops invalid; caps at 8."""
+    valid: list[dict] = []
+    for it in (raw_items or [])[:12]:
+        if not isinstance(it, dict):
+            continue
+        kind = it.get("kind")
+        title = str(it.get("title") or "").strip()[:80]
+        if kind not in ("task", "calendar") or not title:
+            continue
+        payload = it.get("payload") if isinstance(it.get("payload"), dict) else {}
+        if kind == "calendar":
+            if not all(
+                isinstance(payload.get(k), str) and payload.get(k)
+                for k in ("summary", "start", "end")
+            ):
+                continue
+        else:
+            payload = {
+                "title": str(payload.get("title") or title)[:80],
+                "tag": payload.get("tag", "borina"),
+                "priority": payload.get("priority", "medium"),
+            }
+        valid.append({
+            "kind": kind,
+            "title": title,
+            "rationale": str(it.get("rationale") or "")[:200],
+            "payload": payload,
+        })
+    return valid[:8]
+
+
+def _parse_agent_plan(text: str) -> Optional[dict]:
+    """Parse the agent's {brief, threads, items} object. Returns None unless at
+    least one valid item survives (so callers fall back to heuristics)."""
+    if not text:
+        return None
+    m = re.search(r"\{.*\}", text, re.DOTALL)
+    if not m:
+        return None
+    blob = m.group(0)
+    try:
+        raw = json.loads(blob)
+    except Exception:
+        # tmux pane wrap leaves raw newlines inside JSON string literals;
+        # collapsing inter-token whitespace repairs the wrapped strings.
+        try:
+            raw = json.loads(re.sub(r"\n\s*", " ", blob))
+        except Exception:
+            return None
+    if not isinstance(raw, dict):
+        return None
+    items = _validate_items(raw.get("items") if isinstance(raw.get("items"), list) else [])
+    if not items:
+        return None
+    threads: list[dict] = []
+    for t in (raw.get("threads") or [])[:8]:
+        if isinstance(t, dict) and (t.get("name") or t.get("today")):
+            threads.append({
+                "name": str(t.get("name") or "")[:80],
+                "today": str(t.get("today") or "")[:160],
+                "why": str(t.get("why") or "")[:160],
+            })
+    return {"brief": str(raw.get("brief") or "")[:600], "threads": threads, "items": items}
+
+
+async def _run_agent_plan(day: str) -> Optional[dict]:
+    try:
+        prompt = PLANNER_PLAN_PROMPT.format(**_agent_context(day))
+        output = await _call_agent(prompt)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[planner] agent path failed, using heuristics: {exc}")
+        return None
+    # Preferred handoff: the file the agent wrote; pane capture as fallback.
+    try:
+        f = _agent_plan_file(day)
+        if f.exists():
+            parsed = _parse_agent_plan(f.read_text())
+            if parsed:
+                return parsed
+    except Exception as exc:  # noqa: BLE001
+        print(f"[planner] workdir plan unreadable: {exc}")
+    return _parse_agent_plan(output)
+
+
 def _recent_daily_notes(limit: int = 2, max_chars: int = 4000) -> str:
     """Newest Obsidian daily notes — Bo's actual current work (read-only).
     Empty-vault/dev/test environments simply get no vault context."""
@@ -244,6 +389,7 @@ def _agent_context(day: str) -> dict:
         "tldr": brief.get("tldr") or "no brief yet",
         "tasks_focus": brief.get("tasks_focus") or "none",
         "obsidian": _recent_daily_notes() or "no vault notes",
+        "profile": _safe_profile(),
     }
 
 
