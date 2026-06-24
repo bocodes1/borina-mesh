@@ -500,3 +500,24 @@ def plan_digest_text(day: Optional[str] = None) -> str:
     n_cal = sum(1 for i in proposed if i["kind"] == "calendar")
     host = os.getenv("MESH_PUBLIC_HOST", "").strip() or "localhost:3000"
     return f"Plan ready: {n_task} tasks, {n_cal} proposed calendar changes. Approve in /daily. http://{host}/daily"
+
+
+def plan_narrative_text(day: str, summary: dict) -> str:
+    """The morning Telegram narrative: brief → threads → agenda. Trimmed for chat;
+    the full layered document lives in daily-plan.md."""
+    brief = (summary or {}).get("brief") or ""
+    threads = (summary or {}).get("threads") or []
+    plan = get_plan(day)
+    cals = plan.get("calendar", [])
+    lines = [f"Plan for {day}"]
+    if brief:
+        lines += ["", brief]
+    if threads:
+        lines += ["", "Threads:"]
+        for t in threads[:5]:
+            lines.append(f"• {t.get('name', '')}: {t.get('today', '')}")
+    if cals:
+        lines += ["", "Agenda:"]
+        for c in cals[:10]:
+            lines.append(f"• {c['title']}")
+    return "\n".join(lines)

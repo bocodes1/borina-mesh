@@ -133,3 +133,14 @@ def test_parse_agent_plan_repairs_pane_wrapped_json():
     parsed = planner._parse_agent_plan(wrapped)
     assert parsed is not None
     assert parsed["brief"] == "Today is about shipping the planner learner."
+
+
+def test_plan_narrative_text_includes_layers(monkeypatch):
+    summary = {"brief": "Ship the learner today.",
+               "threads": [{"name": "planner", "today": "wire eod"}]}
+    monkeypatch.setattr(planner, "get_plan", lambda day=None: {
+        "calendar": [{"title": "Deep work: planner"}], "tasks": [], "items": []})
+    text = planner.plan_narrative_text("2026-06-24", summary)
+    assert "Ship the learner today." in text
+    assert "planner" in text and "wire eod" in text
+    assert "Deep work: planner" in text

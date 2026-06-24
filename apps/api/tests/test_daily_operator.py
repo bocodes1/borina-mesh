@@ -161,3 +161,28 @@ async def test_eod_phase_survives_learner_error(monkeypatch):
     card = await op.run_phase("eod", day="2026-06-24", send=False)
     assert "EOD recap" in card.headline  # recap still produced
     assert any("Profile update skipped" in l for l in card.lines)
+
+
+@pytest.mark.asyncio
+async def test_morning_phase_sends_narrative(monkeypatch):
+    import daily_operator as op
+    import planner
+    from dispatch import dispatcher, cards
+    sent = []
+    monkeypatch.setattr(op, "_chat_id", lambda: 123)
+    monkeypatch.setattr(dispatcher, "send_telegram_message",
+                        lambda chat, text, **k: sent.append(text) or 1)
+    monkeypatch.setattr(cards, "send_card", lambda chat, card: None)
+
+    async def fake_gen(day=None):
+        return {"source": "agent", "task_count": 0, "calendar_count": 1,
+                "brief": "Focus day.", "threads": [{"name": "planner", "today": "ship"}]}
+    monkeypatch.setattr(planner, "generate_plan_with_agent", fake_gen)
+    monkeypatch.setattr(planner, "get_plan", lambda day=None: {
+        "calendar": [{"title": "Deep work"}], "tasks": [], "items": []})
+    monkeypatch.setattr(op, "_proposed_calendar_items",
+                        lambda day: [{"id": 1, "title": "Deep work", "kind": "calendar",
+                                      "status": "proposed"}])
+
+    await op.run_phase("morning", day="2026-06-24", send=True)
+    assert any("Focus day." in t for t in sent)  # narrative was sent

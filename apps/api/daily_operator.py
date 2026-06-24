@@ -69,14 +69,25 @@ async def run_phase(phase: str, day: Optional[str] = None, *, send: bool = True)
     chat = _chat_id()
 
     if phase == "morning":
-        # Stage the brief + day plan (proposals only — never writes).
+        # Stage the layered plan (proposals only — never writes).
         try:
-            await generate_plan_with_agent(day)
+            summary = await generate_plan_with_agent(day)
         except Exception as e:  # noqa: BLE001
             card = Card(headline=f"Morning plan — {day}", lines=[f"(plan generation failed: {e})"])
             if send and chat:
                 send_card(chat, card)
             return card
+        # Send the layered narrative (brief + threads + agenda) above the card.
+        if send and chat:
+            try:
+                from planner import plan_narrative_text
+                from dispatch.dispatcher import send_telegram_message
+                from dispatch.telegram_format import format_telegram
+                narrative = plan_narrative_text(day, summary)
+                if narrative:
+                    send_telegram_message(chat, format_telegram(narrative, max_lines=30))
+            except Exception as e:  # noqa: BLE001
+                print(f"[operator] morning narrative error: {e}")
         card = build_morning_card(day)
 
     elif phase == "midday":
