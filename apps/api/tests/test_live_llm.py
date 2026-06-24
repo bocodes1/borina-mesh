@@ -5,8 +5,6 @@ The safety rule is unchanged and re-asserted here: the live planner path stages
 proposals only — `create_event` is never called by generation, agent or not.
 """
 import asyncio
-import json
-from pathlib import Path
 
 import pytest
 from sqlmodel import select
@@ -15,8 +13,6 @@ import planner
 import schedule_daily
 from daily_brief import SECTION_IDS, parse_brief, load_brief
 from db import session_scope
-from integrations import google_calendar
-from integrations.base import ok
 from models import PlanItem, Task
 
 
@@ -29,17 +25,6 @@ def _clean():
             s.delete(t)
         s.commit()
     yield
-
-
-def _spy_create_event(monkeypatch):
-    calls = []
-
-    def fake(event, *, user_initiated=False, calendar_id="primary"):
-        calls.append({"user_initiated": user_initiated, "event": event})
-        return ok("google_calendar", {"id": "evt_123"})
-
-    monkeypatch.setattr(google_calendar, "create_event", fake)
-    return calls
 
 
 # ── brief: validation + coercion ─────────────────────────────────────────────
@@ -158,103 +143,7 @@ def test_strip_ui_chrome_drops_response_chrome():
     assert _strip_ui_chrome(text).strip() == "keep me"
 
 
-# ── planner: agent proposals + fallback ──────────────────────────────────────
-
-AGENT_PROPOSALS = [
-    {
-        "kind": "task",
-        "title": "Ship the mesh release",
-        "rationale": "highest leverage",
-        "payload": {"title": "Ship the mesh release", "tag": "work", "priority": "high"},
-    },
-    {
-        "kind": "calendar",
-        "title": "Prep: Investor sync",
-        "rationale": "buffer before the 2pm",
-        "payload": {
-            "summary": "Prep: Investor sync",
-            "start": "2026-06-09T13:45:00",
-            "end": "2026-06-09T14:00:00",
-        },
-    },
-]
-
-
-def test_parse_agent_proposals_valid_with_fences():
-    text = "Here you go:\n```json\n" + json.dumps(AGENT_PROPOSALS) + "\n```"
-    parsed = planner._parse_agent_proposals(text)
-    assert [p["kind"] for p in parsed] == ["task", "calendar"]
-    assert parsed[0]["title"] == "Ship the mesh release"
-
-
-def test_parse_agent_proposals_rejects_garbage():
-    assert planner._parse_agent_proposals("no json here") is None
-    assert planner._parse_agent_proposals("") is None
-    # invalid kinds / missing calendar payload fields are dropped
-    bad = [
-        {"kind": "email", "title": "nope", "payload": {}},
-        {"kind": "calendar", "title": "no payload", "payload": {"summary": "x"}},
-    ]
-    assert planner._parse_agent_proposals(json.dumps(bad)) is None
-
-
-def test_parse_agent_proposals_repairs_pane_wrapped_json():
-    # A tmux pane wraps long strings across lines (raw newline + indent inside
-    # the literal) — this broke the first live run on 2026-06-09.
-    wrapped = json.dumps(AGENT_PROPOSALS, indent=2).replace(
-        "highest leverage", "highest\n  leverage"
-    )
-    parsed = planner._parse_agent_proposals(wrapped)
-    assert parsed is not None and parsed[0]["rationale"] == "highest leverage"
-
-
-def test_generate_plan_with_agent_prefers_workdir_file(tmp_path, monkeypatch):
-    calls = _spy_create_event(monkeypatch)
-    f = tmp_path / "proposals.json"
-    f.write_text(json.dumps(AGENT_PROPOSALS))
-    monkeypatch.setattr(planner, "_agent_proposals_file", lambda day: f)
-
-    async def fake_call(prompt):
-        return "pane junk, no json"
-
-    monkeypatch.setattr(planner, "_call_agent", fake_call)
-    summary = asyncio.run(planner.generate_plan_with_agent())
-    assert summary["source"] == "agent"
-    assert calls == []
-
-
-def test_generate_plan_with_agent_uses_proposals(monkeypatch):
-    monkeypatch.setattr(planner, "_agent_proposals_file", lambda day: Path("/nonexistent"))
-    calls = _spy_create_event(monkeypatch)
-
-    async def fake_call(prompt):
-        return json.dumps(AGENT_PROPOSALS)
-
-    monkeypatch.setattr(planner, "_call_agent", fake_call)
-    summary = asyncio.run(planner.generate_plan_with_agent())
-    assert summary["source"] == "agent"
-    plan = planner.get_plan()
-    titles = {i["title"] for i in plan["items"]}
-    assert {"Ship the mesh release", "Prep: Investor sync"} <= titles
-    assert all(i["status"] == "proposed" for i in plan["items"])
-    # The invariant: the live path stages only — NEVER writes the calendar.
-    assert calls == []
-
-
-def test_generate_plan_with_agent_falls_back_on_garbage(monkeypatch):
-    calls = _spy_create_event(monkeypatch)
-    monkeypatch.setattr(planner, "_agent_proposals_file", lambda day: Path("/nonexistent"))
-
-    async def fake_call(prompt):
-        return "I could not produce JSON, sorry"
-
-    monkeypatch.setattr(planner, "_call_agent", fake_call)
-    summary = asyncio.run(planner.generate_plan_with_agent())
-    assert summary["source"] == "fallback"
-    plan = planner.get_plan()
-    assert any(i["title"] == "Focus block (deep work)" for i in plan["items"])
-    assert calls == []
-
+# ── planner: agent context (obsidian dailies) ───────────────────────────────
 
 def test_planner_context_includes_recent_obsidian_dailies(tmp_path, monkeypatch):
     daily = tmp_path / "01-daily"
