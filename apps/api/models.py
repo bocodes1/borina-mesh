@@ -144,3 +144,24 @@ class ConversationLog(SQLModel, table=True):
     role: str
     text: str
     created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
+
+
+class OutreachItem(SQLModel, table=True):
+    """A staged cold-email outreach (Phase 1). NEVER auto-sent — a send only
+    happens when Bo approves this item via Telegram (the user-initiated action).
+    status: proposed | sent | skipped | failed. Mirrors PlanItem's stage-then-
+    approve lifecycle. Auto-created by init_db's create_all."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    track: str                                    # "swe" | "finance"
+    company: str
+    company_domain: Optional[str] = None
+    contact_name: Optional[str] = None
+    contact_email: str
+    subject: str
+    body: str
+    status: str = Field(default="proposed", index=True)
+    dedup_key: str = Field(index=True)            # normalized contact_email + domain
+    send_via: Optional[str] = None                # "graph" | "browser"
+    error: Optional[str] = None
+    created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
+    sent_at: Optional[datetime] = None
