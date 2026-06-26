@@ -91,6 +91,10 @@ _BUILD_RE = re.compile(
 # "goal: <long-horizon goal>" → the L3 long-runner (decompose → milestones →
 # check-ins). Distinct from "mission:" (single-shot parallel fan-out).
 _GOAL_RE = re.compile(r"^\s*goal\s*[:,]\s+(?P<goal>.+)$", re.IGNORECASE | re.DOTALL)
+# "apply: <optional criteria>" → the internship cold-email pipeline (propose-only).
+# Bare "apply:" uses defaults. Like build:/goal: it's exempt from the generic
+# forbidden gate (it stages text; nothing is sent without Bo's approval tap).
+_APPLY_RE = re.compile(r"^\s*apply\s*[:,]\s*(?P<criteria>.*)$", re.IGNORECASE | re.DOTALL)
 
 
 def _fleet_status_text() -> str:
@@ -137,6 +141,7 @@ COMMANDS = [
     {"command": "jobs", "description": "Running & recent jobs (with cancel buttons)"},
     {"command": "fleet", "description": "Agent roster and their states"},
     {"command": "cancel", "description": "Cancel a running job: /cancel <id>"},
+    {"command": "apply", "description": "Stage internship cold emails: apply: <criteria>"},
 ]
 
 _HELP_TEXT = (
@@ -283,6 +288,8 @@ def _handle_callback(data: str, chat_id: int) -> dict:
         return _handle_fleet_callback(action, data, chat_id)
     if action == "goal":
         return _handle_goal_callback(data, chat_id)
+    if action == "apply":
+        return _handle_apply_callback(data, chat_id)
     return {"ok": True, "status": "unknown_action"}
 
 
@@ -397,6 +404,70 @@ def _handle_operator_callback(data: str, chat_id: int) -> dict:
         return {"ok": True, "status": "op_edit", "item_id": item_id}
 
     return {"ok": True, "status": "op_unknown"}
+
+
+def apply_card(item: dict):
+    """Approval card for one staged OutreachItem: Send / Skip. apply:send:{id}
+    is Bo's user-initiated send tap; apply:skip:{id} sends nothing."""
+    from dispatch.cards import Card, Action
+
+    preview = (item.get("body") or "")[:180]
+    return Card(
+        headline=f"{item['company']} ({item['track']})",
+        lines=[
+            f"To: {item.get('contact_name') or ''} <{item['contact_email']}>",
+            f"Subject: {item['subject']}",
+            preview,
+        ],
+        actions=[
+            Action("Send", f"apply:send:{item['id']}"),
+            Action("Skip", f"apply:skip:{item['id']}"),
+        ],
+    )
+
+
+def send_apply_cards(chat_id: int) -> int:
+    """Post one approval card per proposed OutreachItem. Returns the count."""
+    from dispatch.cards import send_card
+    from dispatch import apply as apply_mod
+
+    items = apply_mod.get_proposed()
+    for it in items:
+        send_card(chat_id, apply_card(it))
+    return len(items)
+
+
+def _handle_apply_callback(data: str, chat_id: int) -> dict:
+    """Apply action buttons: apply:send:{id} / apply:skip:{id}. The Send tap IS
+    the user-initiated action that reaches outlook.send_mail (via approve_send).
+    Only reachable for an allow-listed sender (checked in process_update)."""
+    from dispatch import apply as apply_mod
+
+    parts = data.split(":")
+    verb = parts[1] if len(parts) > 1 else ""
+    try:
+        item_id = int(parts[2]) if len(parts) > 2 else 0
+    except ValueError:
+        return {"ok": True, "status": "apply_bad", "toast": ""}
+
+    try:
+        if verb == "send":
+            res = apply_mod.approve_send(item_id)
+            if res.get("already_decided"):
+                return {"ok": True, "status": "apply_send", "item_id": item_id, "toast": "Already done"}
+            if res.get("status") == "sent":
+                msg, toast = f"Sent to {res.get('company')}.", "Sent ✓"
+            else:
+                msg, toast = (f"Send failed ({res.get('error')}) — kept it so you can retry."), "Failed"
+            dispatcher.send_telegram_message(chat_id, format_telegram(msg))
+            return {"ok": True, "status": "apply_send", "item_id": item_id, "toast": toast}
+        if verb == "skip":
+            res = apply_mod.skip_item(item_id)
+            dispatcher.send_telegram_message(chat_id, format_telegram("Skipped."))
+            return {"ok": True, "status": "apply_skip", "item_id": item_id, "toast": "Skipped"}
+    except KeyError:
+        return {"ok": True, "status": "apply_not_found", "toast": "Not found"}
+    return {"ok": True, "status": "apply_unknown", "toast": ""}
 
 
 def _run_converse(text: str, chat_id: int, heard: str = "") -> None:
@@ -524,6 +595,30 @@ def process_update(update: dict) -> dict:
         dispatcher._record_thread(chat_id, sent_id, "goal", goal_id, gm.group("goal").strip())
         goal_mod.launch_goal(goal_id)
         return {"ok": True, "status": "goal_started", "goal_id": goal_id}
+
+    # 2b1c. Apply: internship cold-email pipeline (propose-only). Stage targets
+    # and post one approval card each. Forbidden-gate exempt like build:/goal:
+    # (it stages text; nothing is sent without Bo's approval tap). Runs the async
+    # pipeline to completion here so the cards are posted before we return.
+    am = _APPLY_RE.match(text)
+    if am:
+        import asyncio
+        from dispatch import apply as apply_mod
+
+        criteria = (am.group("criteria") or "").strip()
+        summary = asyncio.run(apply_mod.run_apply(criteria, chat_id))
+        n_cards = send_apply_cards(chat_id)
+        dropped = summary.get("dropped", 0)
+        tail = f" ({dropped} dropped)" if dropped else ""
+        dispatcher.send_telegram_message(
+            chat_id,
+            format_telegram(
+                f"{heard}Staged {summary.get('staged', 0)} outreach draft(s){tail}. "
+                f"Approve each with Send below."
+            ),
+        )
+        return {"ok": True, "status": "apply_started",
+                "staged": summary.get("staged", 0), "cards": n_cards}
 
     # 2b3. Brain commands — the machine's Obsidian memory, answered inline.
     rm = _REMEMBER_RE.match(text)
