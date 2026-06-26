@@ -191,3 +191,22 @@ class PostingApplication(SQLModel, table=True):
     error: Optional[str] = None
     created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
     submitted_at: Optional[datetime] = None
+
+
+class OutreachReply(SQLModel, table=True):
+    """A matched inbound reply to a sent OutreachItem (Phase 3). Read-only
+    detection records this; it NEVER auto-replies. `flag` is a *suggestion*
+    (interview/rejection language) that stays `confirmed=False` until Bo glances
+    — the pipeline never finalizes a status on its own. `graph_message_id` dedups
+    so the same inbound is matched at most once. Auto-created by init_db's
+    create_all (new table — no ALTER of OutreachItem)."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    outreach_item_id: int = Field(foreign_key="outreachitem.id", index=True)
+    from_email: str = Field(index=True)
+    subject: str
+    preview: str = ""
+    graph_message_id: str = Field(index=True)
+    flag: str = "neutral"                         # neutral | interview | rejection
+    confirmed: bool = False                        # Bo has NOT confirmed; never auto-final
+    received_at: Optional[str] = None
+    created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
