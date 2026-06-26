@@ -16,7 +16,7 @@ from typing import Optional
 from sqlmodel import select
 
 from db import session_scope
-from models import OutreachItem, PostingApplication
+from models import OutreachItem, PostingApplication, OutreachReply
 
 BATCH_CAP = 8
 DAILY_SEND_CAP = 10
@@ -353,3 +353,76 @@ def skip_posting(item_id: int) -> dict:
             s.add(item)
             s.commit()
         return {"status": item.status}
+
+
+# ── Phase 3: reply detection (READ-ONLY — never sends) ───────────────────────
+
+INTERVIEW_PHRASES = (
+    "interview", "schedule a call", "set up a call", "hop on a call",
+    "are you free", "chat about", "next steps", "phone screen",
+)
+REJECTION_PHRASES = (
+    "won't be moving forward", "wont be moving forward", "not moving forward",
+    "decided not to", "unable to offer", "no longer considering",
+    "filled the position", "unfortunately",
+)
+
+
+def _classify_reply(subject: str, preview: str) -> str:
+    """Suggest a flag from reply language. interview/rejection are *suggestions*
+    for Bo to confirm — the caller never finalizes a status automatically."""
+    blob = f"{subject}\n{preview}".lower()
+    if any(p in blob for p in INTERVIEW_PHRASES):
+        return "interview"
+    if any(p in blob for p in REJECTION_PHRASES):
+        return "rejection"
+    return "neutral"
+
+
+def match_replies(since_iso: Optional[str] = None) -> dict:
+    """READ-ONLY reply detection (spec §3). Read the inbox, match inbound mail to
+    a sent OutreachItem by recipient email, record an OutreachReply (deduped by
+    graph_message_id), and advance the item to 'replied'. The interview/rejection
+    flag stays UNCONFIRMED — never auto-final. NEVER sends anything."""
+    from integrations import outlook
+
+    inbox = outlook.list_inbox(since_iso=since_iso)
+    if not inbox.connected:
+        return {"matched": 0, "replied_item_ids": [], "flags": {}, "reasons": [inbox.error or "inbox unavailable"]}
+
+    matched = 0
+    replied_item_ids: list[int] = []
+    flags: dict[int, str] = {}
+    reasons: list[str] = []
+
+    with session_scope() as s:
+        # sent (or already-replied) items, keyed by lower-cased recipient
+        sent = s.exec(
+            select(OutreachItem).where(OutreachItem.status.in_(("sent", "replied")))
+        ).all()
+        by_email = {(it.contact_email or "").strip().lower(): it for it in sent}
+        seen_ids = {r.graph_message_id for r in s.exec(select(OutreachReply)).all()}
+
+        for msg in inbox.data or []:
+            gid = msg.get("id", "")
+            sender = (msg.get("from") or "").strip().lower()
+            item = by_email.get(sender)
+            if not item or not gid or gid in seen_ids:
+                continue
+            flag = _classify_reply(msg.get("subject", ""), msg.get("preview", ""))
+            s.add(OutreachReply(
+                outreach_item_id=item.id, from_email=sender,
+                subject=msg.get("subject", ""), preview=msg.get("preview", ""),
+                graph_message_id=gid, flag=flag, received_at=msg.get("received"),
+            ))
+            if item.status != "replied":
+                item.status = "replied"
+                s.add(item)
+            seen_ids.add(gid)
+            matched += 1
+            replied_item_ids.append(item.id)
+            flags[item.id] = flag
+        s.commit()
+
+    return {"matched": matched, "replied_item_ids": replied_item_ids,
+            "flags": flags, "reasons": reasons}
