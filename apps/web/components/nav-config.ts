@@ -8,6 +8,7 @@ import {
   LineChart,
   Sun,
   CalendarDays,
+  Mail,
   type LucideIcon,
 } from "lucide-react";
 
@@ -27,6 +28,7 @@ export const NAV_LINKS: NavLink[] = [
   { href: "/network", label: "Network", icon: Network },
   { href: "/analytics", label: "Analytics", icon: BarChart3 },
   { href: "/jobs", label: "Jobs", icon: ListTodo },
+  { href: "/outreach", label: "Outreach", icon: Mail },
   { href: "/artifacts", label: "Files", icon: FileText },
   { href: "/polymarket", label: "Polymarket", icon: TrendingUp },
 ];

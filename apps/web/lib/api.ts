@@ -142,7 +142,36 @@ export const api = {
     const s = qs.toString();
     return fetchJSON<FilesResponse>(`/files${s ? `?${s}` : ""}`);
   },
+
+  // ── Outreach tab (read-only) ─────────────────────────────────────────────
+  getOutreachSummary: () => fetchJSON<OutreachSummary>("/outreach/summary"),
 };
+
+export interface OutreachRow {
+  id: number;
+  company: string;
+  track: string;
+  contact_email: string;
+  status: string;
+  subject: string;
+  is_followup: boolean;
+  created_at: string | null;
+  sent_at: string | null;
+}
+export interface OutreachReplyRow {
+  outreach_item_id: number;
+  from_email: string;
+  subject: string;
+  flag: string;
+  confirmed: boolean;
+  received_at: string | null;
+}
+export interface OutreachSummary {
+  counts: Record<string, number>;
+  rows: OutreachRow[];
+  replies: OutreachReplyRow[];
+  week: { sent: number; replied: number; awaiting_followup: number };
+}
 
 export interface FileItem {
   name: string;

@@ -10,13 +10,14 @@ counted + reasoned in the summary — never silently lost.
 from __future__ import annotations
 
 import json
-from datetime import datetime
+import os
+from datetime import datetime, timedelta
 from typing import Optional
 
 from sqlmodel import select
 
 from db import session_scope
-from models import OutreachItem, PostingApplication
+from models import OutreachItem, PostingApplication, OutreachReply
 
 BATCH_CAP = 8
 DAILY_SEND_CAP = 10
@@ -353,3 +354,173 @@ def skip_posting(item_id: int) -> dict:
             s.add(item)
             s.commit()
         return {"status": item.status}
+
+
+# ── Phase 3: reply detection (READ-ONLY — never sends) ───────────────────────
+
+INTERVIEW_PHRASES = (
+    "interview", "schedule a call", "set up a call", "hop on a call",
+    "are you free", "chat about", "next steps", "phone screen",
+)
+REJECTION_PHRASES = (
+    "won't be moving forward", "wont be moving forward", "not moving forward",
+    "decided not to", "unable to offer", "no longer considering",
+    "filled the position", "unfortunately",
+)
+
+
+def _classify_reply(subject: str, preview: str) -> str:
+    """Suggest a flag from reply language. interview/rejection are *suggestions*
+    for Bo to confirm — the caller never finalizes a status automatically."""
+    blob = f"{subject}\n{preview}".lower()
+    if any(p in blob for p in INTERVIEW_PHRASES):
+        return "interview"
+    if any(p in blob for p in REJECTION_PHRASES):
+        return "rejection"
+    return "neutral"
+
+
+def match_replies(since_iso: Optional[str] = None) -> dict:
+    """READ-ONLY reply detection (spec §3). Read the inbox, match inbound mail to
+    a sent OutreachItem by recipient email, record an OutreachReply (deduped by
+    graph_message_id), and advance the item to 'replied'. The interview/rejection
+    flag stays UNCONFIRMED — never auto-final. NEVER sends anything."""
+    from integrations import outlook
+
+    inbox = outlook.list_inbox(since_iso=since_iso)
+    if not inbox.connected:
+        return {"matched": 0, "replied_item_ids": [], "flags": {}, "reasons": [inbox.error or "inbox unavailable"]}
+
+    matched = 0
+    replied_item_ids: list[int] = []
+    flags: dict[int, str] = {}
+    reasons: list[str] = []
+
+    with session_scope() as s:
+        # sent (or already-replied) items, keyed by lower-cased recipient
+        sent = s.exec(
+            select(OutreachItem).where(OutreachItem.status.in_(("sent", "replied")))
+        ).all()
+        by_email = {(it.contact_email or "").strip().lower(): it for it in sent}
+        seen_ids = {r.graph_message_id for r in s.exec(select(OutreachReply)).all()}
+
+        for msg in inbox.data or []:
+            gid = msg.get("id", "")
+            sender = (msg.get("from") or "").strip().lower()
+            item = by_email.get(sender)
+            if not item or not gid or gid in seen_ids:
+                continue
+            flag = _classify_reply(msg.get("subject", ""), msg.get("preview", ""))
+            s.add(OutreachReply(
+                outreach_item_id=item.id, from_email=sender,
+                subject=msg.get("subject", ""), preview=msg.get("preview", ""),
+                graph_message_id=gid, flag=flag, received_at=msg.get("received"),
+            ))
+            if item.status != "replied":
+                item.status = "replied"
+                s.add(item)
+            seen_ids.add(gid)
+            matched += 1
+            replied_item_ids.append(item.id)
+            flags[item.id] = flag
+        s.commit()
+
+    return {"matched": matched, "replied_item_ids": replied_item_ids,
+            "flags": flags, "reasons": reasons}
+
+
+# ── Phase 3: follow-ups (staged only — sent via Phase 1 approve_send) ─────────
+
+FOLLOWUP_DAYS = 7
+FOLLOWUP_PREFIX = "[followup] "
+
+
+def _load_blocklist() -> set[str]:
+    """Lower-cased emails Bo never wants contacted/followed-up, from
+    04-resources/applications/blocklist.md (one email per line; '#' comments
+    ignored). Empty when the file is missing — fail-open on read, fail-closed on
+    membership (a listed email is always dropped)."""
+    root = os.getenv("OBSIDIAN_VAULT_PATH", "").strip()
+    if not root:
+        return set()
+    path = os.path.join(root, "04-resources", "applications", "blocklist.md")
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            lines = fh.read().splitlines()
+    except OSError:
+        return set()
+    out = set()
+    for ln in lines:
+        ln = ln.strip()
+        if ln and not ln.startswith("#"):
+            out.add(ln.lower())
+    return out
+
+
+async def stage_followups(now: Optional[datetime] = None) -> dict:
+    """Stage a follow-up OutreachItem for each sent item with no reply after
+    FOLLOWUP_DAYS. ONE follow-up per contact (a FOLLOWUP_PREFIX row already
+    existing for the dedup_key blocks a second); respect DAILY_SEND_CAP; honor
+    the blocklist. Staging NEVER sends — the follow-up is sent only via Phase 1's
+    approve_send on Bo's tap. Drops are counted + reasoned (no silent caps)."""
+    now = now or datetime.utcnow()
+    cutoff = now - timedelta(days=FOLLOWUP_DAYS)
+    blocklist = _load_blocklist()
+
+    with session_scope() as s:
+        sent = s.exec(
+            select(OutreachItem).where(OutreachItem.status == "sent")
+            .order_by(OutreachItem.created_at)
+        ).all()
+        existing_keys = {r.dedup_key for r in s.exec(select(OutreachItem)).all()}
+        candidates = [
+            {"id": it.id, "company": it.company, "track": it.track,
+             "domain": it.company_domain, "contact_email": it.contact_email,
+             "contact_name": it.contact_name, "dedup_key": it.dedup_key,
+             "sent_at": it.sent_at or it.created_at}
+            for it in sent
+        ]
+
+    item_ids: list[int] = []
+    dropped = 0
+    reasons: list[str] = []
+
+    for cand in candidates:
+        email = (cand["contact_email"] or "").strip().lower()
+        fkey = FOLLOWUP_PREFIX + cand["dedup_key"]
+        if (cand["sent_at"] or now) > cutoff:
+            dropped += 1
+            reasons.append(f"{cand['company']}: too recent (< {FOLLOWUP_DAYS}d)")
+            continue
+        if fkey in existing_keys:
+            dropped += 1
+            reasons.append(f"{cand['company']}: already followed up")
+            continue
+        if email in blocklist:
+            dropped += 1
+            reasons.append(f"{cand['company']}: blocklist")
+            continue
+        if len(item_ids) >= DAILY_SEND_CAP:
+            dropped += 1
+            reasons.append(f"{cand['company']}: over daily cap ({DAILY_SEND_CAP})")
+            continue
+        draft = await draft_email(
+            {"company": cand["company"], "domain": cand["domain"],
+             "why_fit": "a brief follow-up on my earlier note", "track": cand["track"]},
+            {"name": cand["contact_name"], "email": cand["contact_email"]},
+        )
+        with session_scope() as s:
+            row = OutreachItem(
+                track=cand["track"], company=cand["company"],
+                company_domain=cand["domain"], contact_name=cand["contact_name"],
+                contact_email=cand["contact_email"], subject=draft["subject"],
+                body=draft["body"], dedup_key=fkey,
+            )
+            s.add(row)
+            s.commit()
+            s.refresh(row)
+            item_ids.append(row.id)
+        existing_keys.add(fkey)
+
+    return {"staged": len(item_ids), "dropped": dropped,
+            "item_ids": item_ids, "reasons": reasons}

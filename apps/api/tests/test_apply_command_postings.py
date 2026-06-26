@@ -75,6 +75,13 @@ async def test_weekly_cron_stages_both_without_submitting(monkeypatch):
     monkeypatch.setattr(ap, "run_postings", fake_run)
     monkeypatch.setattr(ap, "get_proposed", lambda: [])
     monkeypatch.setattr(ap, "get_proposed_postings", lambda: [])
+    # Phase 3: cron also sweeps replies + stages follow-ups — stub (read-only/no-send).
+    monkeypatch.setattr(ap, "match_replies",
+                        lambda since_iso=None: {"matched": 0, "replied_item_ids": [], "flags": {}, "reasons": []})
+
+    async def _no_followups(now=None):
+        return {"staged": 0, "dropped": 0, "item_ids": [], "reasons": []}
+    monkeypatch.setattr(ap, "stage_followups", _no_followups)
     monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
 
     svc = SchedulerService()
