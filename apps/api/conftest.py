@@ -58,4 +58,8 @@ def _isolate_fs_env(monkeypatch):
     """
     monkeypatch.setenv("OBSIDIAN_VAULT_PATH", "")
     monkeypatch.setenv("REPORTS_DIR", str(_TEST_REPORTS))
+    # Finance data-source keys live in .env (loaded via load_dotenv); clear them
+    # so connectivity tests stay hermetic. Tests that need a key set it in-body.
+    for _key in ("MARKET_DATA_API_KEY", "FMP_API_KEY", "POLYGON_API_KEY", "FRED_API_KEY"):
+        monkeypatch.delenv(_key, raising=False)
     yield
