@@ -65,6 +65,12 @@ def test_apply_command_stages_and_cards(monkeypatch, _capture):
         {"id": 11, "track": "swe", "company": "Acme AI",
          "contact_email": "ada@acme.ai", "subject": "S", "body": "B"}])
 
+    # Phase 2: the apply: command also runs postings — stub it (no real network).
+    async def fake_postings(criteria="", chat_id=None):
+        return {"staged": 0, "dropped": 0, "item_ids": [], "reasons": []}
+    monkeypatch.setattr(ap, "run_postings", fake_postings)
+    monkeypatch.setattr(ap, "get_proposed_postings", lambda: [])
+
     update = {"update_id": 1, "message": {"chat": {"id": BO}, "text": "apply: AI fintech remote"}}
     res = tg.process_update(update)
     assert res["status"] == "apply_started"

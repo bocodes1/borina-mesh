@@ -165,3 +165,29 @@ class OutreachItem(SQLModel, table=True):
     error: Optional[str] = None
     created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
     sent_at: Optional[datetime] = None
+
+
+class PostingApplication(SQLModel, table=True):
+    """A staged job-board posting application (Phase 2). NEVER auto-submitted —
+    a submit only happens when Bo approves this item via Telegram (the
+    user-initiated action). submit_method routes the act: "email" reuses
+    outlook.send_mail; "form" uses BrowserFiller (fills, human submits);
+    "external" hands Bo a deep link + prepared text. status: proposed | prepared
+    | submitted | skipped | failed. Mirrors OutreachItem's lifecycle. Auto-created
+    by init_db's create_all."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    track: str                                    # "swe" | "finance"
+    source: str                                   # "wellfound" | "yc" | "career_page" | "clnx" | ...
+    company: str
+    role_title: str
+    location: Optional[str] = None
+    posting_url: str = Field(index=True)
+    submit_method: str                            # "email" | "form" | "external"
+    ats: Optional[str] = None                     # "greenhouse" | "lever" | "workday" | None
+    cover_letter: Optional[str] = None
+    answers_json: str = "{}"                       # common-question answers (JSON object)
+    status: str = Field(default="proposed", index=True)
+    dedup_key: str = Field(index=True)            # normalized company + role_title
+    error: Optional[str] = None
+    created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
+    submitted_at: Optional[datetime] = None

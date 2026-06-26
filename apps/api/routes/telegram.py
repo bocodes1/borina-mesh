@@ -437,6 +437,44 @@ def send_apply_cards(chat_id: int) -> int:
     return len(items)
 
 
+def posting_card(item: dict):
+    """Approval card for one staged PostingApplication: Submit / Skip / Open.
+    apply:submit:{id} is Bo's user-initiated tap (email→send, form→fill-then-stop,
+    external→handoff); apply:pskip:{id} skips; apply:open:{id} surfaces the link."""
+    from dispatch.cards import Card, Action
+
+    method = item.get("submit_method", "form")
+    note = {"email": "applies by email",
+            "form": "auto-fills the form, then YOU submit",
+            "external": "prepares text + deep link, you submit"}.get(method, method)
+    preview = (item.get("cover_letter") or "")[:160]
+    return Card(
+        headline=f"{item['company']} — {item['role_title']} ({item['track']})",
+        lines=[
+            f"Source: {item.get('source')}  Location: {item.get('location') or 'n/a'}",
+            f"Apply: {method} — {note}",
+            preview,
+        ],
+        actions=[
+            Action("Submit", f"apply:submit:{item['id']}"),
+            Action("Skip", f"apply:pskip:{item['id']}"),
+            Action("Open", f"apply:open:{item['id']}"),
+        ],
+        buttons_per_row=3,
+    )
+
+
+def send_posting_cards(chat_id: int) -> int:
+    """Post one approval card per proposed PostingApplication. Returns the count."""
+    from dispatch.cards import send_card
+    from dispatch import apply as apply_mod
+
+    items = apply_mod.get_proposed_postings()
+    for it in items:
+        send_card(chat_id, posting_card(it))
+    return len(items)
+
+
 def _handle_apply_callback(data: str, chat_id: int) -> dict:
     """Apply action buttons: apply:send:{id} / apply:skip:{id}. The Send tap IS
     the user-initiated action that reaches outlook.send_mail (via approve_send).
@@ -465,6 +503,35 @@ def _handle_apply_callback(data: str, chat_id: int) -> dict:
             res = apply_mod.skip_item(item_id)
             dispatcher.send_telegram_message(chat_id, format_telegram("Skipped."))
             return {"ok": True, "status": "apply_skip", "item_id": item_id, "toast": "Skipped"}
+        if verb == "submit":
+            res = apply_mod.submit_posting(item_id)
+            if res.get("already_decided"):
+                return {"ok": True, "status": "apply_submit", "item_id": item_id, "toast": "Already done"}
+            method = res.get("method")
+            status = res.get("status")
+            if status == "submitted":
+                msg, toast = f"Applied to {res.get('company')} by email.", "Submitted ✓"
+            elif status == "prepared" and method == "form":
+                msg = (f"Form filled — review & submit it yourself:\n{res.get('review_url')}")
+                toast = "Filled — you submit"
+            elif status == "prepared" and method == "external":
+                h = res.get("handoff", {})
+                msg = (f"Prepared. Apply here yourself:\n{h.get('posting_url')}\n\n"
+                       f"Cover letter:\n{h.get('cover_letter')}")
+                toast = "Prepared — handoff"
+            else:
+                msg, toast = (f"Submit failed ({res.get('error')}) — kept it so you can retry."), "Failed"
+            dispatcher.send_telegram_message(chat_id, format_telegram(msg))
+            return {"ok": True, "status": "apply_submit", "item_id": item_id, "toast": toast}
+        if verb == "pskip":
+            apply_mod.skip_posting(item_id)
+            dispatcher.send_telegram_message(chat_id, format_telegram("Skipped posting."))
+            return {"ok": True, "status": "apply_pskip", "item_id": item_id, "toast": "Skipped"}
+        if verb == "open":
+            match = next((p for p in apply_mod.get_proposed_postings() if p["id"] == item_id), None)
+            link = match["posting_url"] if match else "(no link)"
+            dispatcher.send_telegram_message(chat_id, format_telegram(f"Posting: {link}"))
+            return {"ok": True, "status": "apply_open", "item_id": item_id, "toast": ""}
     except KeyError:
         return {"ok": True, "status": "apply_not_found", "toast": "Not found"}
     return {"ok": True, "status": "apply_unknown", "toast": ""}
@@ -596,29 +663,33 @@ def process_update(update: dict) -> dict:
         goal_mod.launch_goal(goal_id)
         return {"ok": True, "status": "goal_started", "goal_id": goal_id}
 
-    # 2b1c. Apply: internship cold-email pipeline (propose-only). Stage targets
-    # and post one approval card each. Forbidden-gate exempt like build:/goal:
-    # (it stages text; nothing is sent without Bo's approval tap). Runs the async
-    # pipeline to completion here so the cards are posted before we return.
+    # 2b1c. Apply: internship pipeline (propose-only) — covers BOTH cold-email
+    # targets and job-board postings. Stage each kind and post one approval card
+    # per item. Forbidden-gate exempt like build:/goal: (it stages text; nothing
+    # is sent/submitted without Bo's approval tap). Runs the async pipelines to
+    # completion here so the cards are posted before we return.
     am = _APPLY_RE.match(text)
     if am:
         import asyncio
         from dispatch import apply as apply_mod
 
         criteria = (am.group("criteria") or "").strip()
-        summary = asyncio.run(apply_mod.run_apply(criteria, chat_id))
-        n_cards = send_apply_cards(chat_id)
-        dropped = summary.get("dropped", 0)
+        email_summary = asyncio.run(apply_mod.run_apply(criteria, chat_id))
+        posting_summary = asyncio.run(apply_mod.run_postings(criteria, chat_id))
+        n_email = send_apply_cards(chat_id)
+        n_post = send_posting_cards(chat_id)
+        staged = email_summary.get("staged", 0) + posting_summary.get("staged", 0)
+        dropped = email_summary.get("dropped", 0) + posting_summary.get("dropped", 0)
         tail = f" ({dropped} dropped)" if dropped else ""
         dispatcher.send_telegram_message(
             chat_id,
             format_telegram(
-                f"{heard}Staged {summary.get('staged', 0)} outreach draft(s){tail}. "
-                f"Approve each with Send below."
+                f"{heard}Staged {staged} application(s){tail} "
+                f"({n_email} email, {n_post} posting). Approve each below."
             ),
         )
-        return {"ok": True, "status": "apply_started",
-                "staged": summary.get("staged", 0), "cards": n_cards}
+        return {"ok": True, "status": "apply_started", "staged": staged,
+                "cards": n_email, "posting_cards": n_post}
 
     # 2b3. Brain commands — the machine's Obsidian memory, answered inline.
     rm = _REMEMBER_RE.match(text)

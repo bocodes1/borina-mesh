@@ -65,6 +65,26 @@ class BrowserSender:
         raise RuntimeError("browser transport not wired — set OUTLOOK_SEND_TRANSPORT=graph")
 
 
+class BrowserFiller:
+    """Playwright-driven application-form filler (Phase 2 — form postings).
+
+    SAFETY: this fills name/email/resume-upload/cover/answers in Bo's logged-in
+    browser and then STOPS before the final submit — Bo reviews and clicks submit
+    himself (the human-submit gate). There is deliberately NO auto-submit code
+    path here. Stubbed in tests; the real Playwright driver is wired in only if
+    Phase 0 chose the browser transport. Unwired it fails closed (raises) so a
+    misconfig never silently claims a form was filled."""
+
+    via = "browser"
+
+    def fill(self, posting_url: str, fields: dict, *,
+             resume_path: Optional[str] = None) -> dict:
+        raise RuntimeError(
+            "browser form-fill not wired — set up the Playwright driver "
+            "(OUTLOOK_SEND_TRANSPORT=browser) on the Mini"
+        )
+
+
 def _sender(send_via: Optional[str]):
     choice = (send_via or env("OUTLOOK_SEND_TRANSPORT") or "graph").lower()
     return BrowserSender() if choice == "browser" else GraphSender()
