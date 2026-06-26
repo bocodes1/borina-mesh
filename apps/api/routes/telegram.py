@@ -663,29 +663,33 @@ def process_update(update: dict) -> dict:
         goal_mod.launch_goal(goal_id)
         return {"ok": True, "status": "goal_started", "goal_id": goal_id}
 
-    # 2b1c. Apply: internship cold-email pipeline (propose-only). Stage targets
-    # and post one approval card each. Forbidden-gate exempt like build:/goal:
-    # (it stages text; nothing is sent without Bo's approval tap). Runs the async
-    # pipeline to completion here so the cards are posted before we return.
+    # 2b1c. Apply: internship pipeline (propose-only) — covers BOTH cold-email
+    # targets and job-board postings. Stage each kind and post one approval card
+    # per item. Forbidden-gate exempt like build:/goal: (it stages text; nothing
+    # is sent/submitted without Bo's approval tap). Runs the async pipelines to
+    # completion here so the cards are posted before we return.
     am = _APPLY_RE.match(text)
     if am:
         import asyncio
         from dispatch import apply as apply_mod
 
         criteria = (am.group("criteria") or "").strip()
-        summary = asyncio.run(apply_mod.run_apply(criteria, chat_id))
-        n_cards = send_apply_cards(chat_id)
-        dropped = summary.get("dropped", 0)
+        email_summary = asyncio.run(apply_mod.run_apply(criteria, chat_id))
+        posting_summary = asyncio.run(apply_mod.run_postings(criteria, chat_id))
+        n_email = send_apply_cards(chat_id)
+        n_post = send_posting_cards(chat_id)
+        staged = email_summary.get("staged", 0) + posting_summary.get("staged", 0)
+        dropped = email_summary.get("dropped", 0) + posting_summary.get("dropped", 0)
         tail = f" ({dropped} dropped)" if dropped else ""
         dispatcher.send_telegram_message(
             chat_id,
             format_telegram(
-                f"{heard}Staged {summary.get('staged', 0)} outreach draft(s){tail}. "
-                f"Approve each with Send below."
+                f"{heard}Staged {staged} application(s){tail} "
+                f"({n_email} email, {n_post} posting). Approve each below."
             ),
         )
-        return {"ok": True, "status": "apply_started",
-                "staged": summary.get("staged", 0), "cards": n_cards}
+        return {"ok": True, "status": "apply_started", "staged": staged,
+                "cards": n_email, "posting_cards": n_post}
 
     # 2b3. Brain commands — the machine's Obsidian memory, answered inline.
     rm = _REMEMBER_RE.match(text)

@@ -297,28 +297,35 @@ class SchedulerService:
             print(f"[scheduler] Failed to register fleet-health: {e}")
 
     async def _run_apply_weekly(self) -> None:
-        """Weekly internship cold-email batch: stage drafts and post approval
-        cards. NEVER sends — send stays behind Bo's approval tap."""
+        """Weekly internship batch: stage cold-email drafts AND job-board postings,
+        then post approval cards for each. NEVER sends/submits — that stays behind
+        Bo's approval tap."""
         try:
             import os
             from dispatch import apply as apply_mod
-            summary = await apply_mod.run_apply("")
+            email_summary = await apply_mod.run_apply("")
+            posting_summary = await apply_mod.run_postings("")
             chat = os.getenv("TELEGRAM_CHAT_ID", "").strip()
             if chat:
-                from routes.telegram import send_apply_cards
+                from routes.telegram import send_apply_cards, send_posting_cards
                 from dispatch import dispatcher
                 from dispatch.telegram_format import format_telegram
-                n = send_apply_cards(int(chat))
+                n_email = send_apply_cards(int(chat))
+                n_post = send_posting_cards(int(chat))
+                staged = email_summary.get("staged", 0) + posting_summary.get("staged", 0)
+                dropped = email_summary.get("dropped", 0) + posting_summary.get("dropped", 0)
                 dispatcher.send_telegram_message(
                     int(chat),
                     format_telegram(
-                        f"Weekly applier: staged {summary.get('staged', 0)} draft(s), "
-                        f"{summary.get('dropped', 0)} dropped. Approve each with Send."
+                        f"Weekly applier: staged {staged} application(s) "
+                        f"({n_email} email, {n_post} posting), {dropped} dropped. "
+                        f"Approve each with the buttons."
                     ),
                 )
-                print(f"[scheduler] apply-weekly: {n} card(s)")
+                print(f"[scheduler] apply-weekly: {n_email + n_post} card(s)")
             else:
-                print(f"[scheduler] apply-weekly: staged {summary.get('staged', 0)} (no chat configured)")
+                staged = email_summary.get("staged", 0) + posting_summary.get("staged", 0)
+                print(f"[scheduler] apply-weekly: staged {staged} (no chat configured)")
         except Exception as e:
             print(f"[scheduler] apply-weekly error: {e}")
 

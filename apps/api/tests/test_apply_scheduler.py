@@ -37,6 +37,9 @@ async def test_run_apply_weekly_stages_without_sending(monkeypatch):
 
     monkeypatch.setattr(ap, "run_apply", fake_run)
     monkeypatch.setattr(ap, "get_proposed", lambda: [])
+    # Phase 2: the cron also stages postings — stub it (no real network).
+    monkeypatch.setattr(ap, "run_postings", fake_run)
+    monkeypatch.setattr(ap, "get_proposed_postings", lambda: [])
     monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
 
     svc = SchedulerService()
