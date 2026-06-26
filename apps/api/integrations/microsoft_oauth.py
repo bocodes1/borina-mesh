@@ -24,7 +24,7 @@ from .base import env
 
 AUTH_URI = "https://login.microsoftonline.com/common/oauth2/v2.0/authorize"
 TOKEN_URI = "https://login.microsoftonline.com/common/oauth2/v2.0/token"
-SCOPE = "offline_access Mail.Send User.Read"
+SCOPE = "offline_access Mail.Send Mail.Read User.Read"
 
 
 def configured() -> bool:

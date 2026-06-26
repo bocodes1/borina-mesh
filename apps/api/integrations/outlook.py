@@ -14,6 +14,7 @@ from typing import Optional
 from .base import (
     IntegrationResult,
     env,
+    http_get_json,
     http_post_json,
     not_connected,
     ok,
@@ -124,3 +125,37 @@ def send_mail(
     sender = _sender(send_via)
     result = sender.send(recipients, subject, body, attachments)
     return ok(SOURCE, {"id": result.get("id"), "via": sender.via})
+
+
+@safe(SOURCE)
+def list_inbox(since_iso: Optional[str] = None, top: int = 25) -> IntegrationResult:
+    """Read-only inbox fetch for reply detection (spec §3). Graph GET
+    /me/messages, newest first. NEVER sends — this is the additive Mail.Read
+    path. Each message is flattened to {id, from (lower-cased), subject,
+    received, preview} so the reply matcher can compare sender to a staged
+    contact_email. not_connected when unauthorized (the matcher then no-ops)."""
+    if not _oauth_configured() or not _access_token():
+        return not_connected(SOURCE, "Outlook not authorized")
+    params = {
+        "$top": str(top),
+        "$orderby": "receivedDateTime desc",
+        "$select": "id,subject,from,receivedDateTime,bodyPreview",
+    }
+    if since_iso:
+        params["$filter"] = f"receivedDateTime ge {since_iso}"
+    raw = http_get_json(
+        f"{GRAPH_BASE}/me/messages",
+        params=params,
+        headers={"Authorization": f"Bearer {_access_token()}"},
+    )
+    out = []
+    for m in (raw or {}).get("value", []) or []:
+        addr = (((m.get("from") or {}).get("emailAddress") or {}).get("address") or "")
+        out.append({
+            "id": m.get("id", ""),
+            "from": addr.strip().lower(),
+            "subject": m.get("subject", "") or "",
+            "received": m.get("receivedDateTime", "") or "",
+            "preview": m.get("bodyPreview", "") or "",
+        })
+    return ok(SOURCE, out)
