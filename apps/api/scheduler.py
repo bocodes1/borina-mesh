@@ -296,6 +296,51 @@ class SchedulerService:
         except Exception as e:
             print(f"[scheduler] Failed to register fleet-health: {e}")
 
+    async def _run_apply_weekly(self) -> None:
+        """Weekly internship cold-email batch: stage drafts and post approval
+        cards. NEVER sends — send stays behind Bo's approval tap."""
+        try:
+            import os
+            from dispatch import apply as apply_mod
+            summary = await apply_mod.run_apply("")
+            chat = os.getenv("TELEGRAM_CHAT_ID", "").strip()
+            if chat:
+                from routes.telegram import send_apply_cards
+                from dispatch import dispatcher
+                from dispatch.telegram_format import format_telegram
+                n = send_apply_cards(int(chat))
+                dispatcher.send_telegram_message(
+                    int(chat),
+                    format_telegram(
+                        f"Weekly applier: staged {summary.get('staged', 0)} draft(s), "
+                        f"{summary.get('dropped', 0)} dropped. Approve each with Send."
+                    ),
+                )
+                print(f"[scheduler] apply-weekly: {n} card(s)")
+            else:
+                print(f"[scheduler] apply-weekly: staged {summary.get('staged', 0)} (no chat configured)")
+        except Exception as e:
+            print(f"[scheduler] apply-weekly error: {e}")
+
+    def register_apply_weekly(self) -> None:
+        """Weekly internship cold-email batch — Mondays 09:00 ET."""
+        try:
+            from zoneinfo import ZoneInfo
+            tz = ZoneInfo("America/New_York")
+        except Exception:
+            tz = None
+        job_id = "apply-weekly"
+        if self._scheduler.get_job(job_id):
+            return
+        try:
+            trigger = CronTrigger(day_of_week="mon", hour=9, minute=0, timezone=tz) if tz \
+                else CronTrigger(day_of_week="mon", hour=14, minute=0)
+            self._scheduler.add_job(self._run_apply_weekly, trigger=trigger, id=job_id, replace_existing=True)
+            self._schedules["apply-weekly"] = "0 9 * * mon America/New_York"
+            print("[scheduler] Registered default: apply-weekly @ Mon 9am ET")
+        except Exception as e:
+            print(f"[scheduler] Failed to register apply-weekly: {e}")
+
     async def _run_operator(self, phase: str) -> None:
         """Run a daily-operator phase (morning/midday/eod). Proposes via Cards;
         never writes the calendar."""

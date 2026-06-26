@@ -83,6 +83,7 @@ async def lifespan(app: FastAPI):
     scheduler_service.register_planner()
     scheduler_service.register_operator()
     scheduler_service.register_fleet_health()
+    scheduler_service.register_apply_weekly()
     # Register the Telegram slash-command menu so /help /jobs /fleet /cancel
     # autocomplete in the client.
     try:
