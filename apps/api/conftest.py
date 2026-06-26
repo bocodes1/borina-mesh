@@ -58,4 +58,12 @@ def _isolate_fs_env(monkeypatch):
     """
     monkeypatch.setenv("OBSIDIAN_VAULT_PATH", "")
     monkeypatch.setenv("REPORTS_DIR", str(_TEST_REPORTS))
+    # Redirect the agent workdir root to a throwaway dir so tests that read an
+    # agent's file handoff (e.g. planner._agent_plan_file) can't pick up a real
+    # plan file left by a live run on this machine. Resolved at call time via
+    # `from agents.runner_v2 import _workdir_root`, so patching the module attr
+    # is enough.
+    import agents.runner_v2 as _runner_v2
+
+    monkeypatch.setattr(_runner_v2, "_workdir_root", lambda: _TEST_REPORTS / "agents")
     yield
