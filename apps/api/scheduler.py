@@ -296,36 +296,77 @@ class SchedulerService:
         except Exception as e:
             print(f"[scheduler] Failed to register fleet-health: {e}")
 
+    def _digest_card(self):
+        """Weekly outreach digest (read-only): N sent, M replies, K awaiting
+        follow-up. Reuses the foundation Card channel. Computes counts straight
+        from the staging tables — never sends."""
+        from datetime import datetime, timedelta
+        from sqlmodel import select
+        from db import session_scope
+        from models import OutreachItem, OutreachReply
+        from dispatch.cards import Card
+
+        week_start = datetime.utcnow() - timedelta(days=7)
+        cutoff = datetime.utcnow() - timedelta(days=7)
+        with session_scope() as s:
+            items = s.exec(select(OutreachItem)).all()
+            replies = s.exec(select(OutreachReply)).all()
+            sent = sum(1 for it in items if it.sent_at and it.sent_at >= week_start)
+            replied = sum(1 for r in replies if r.created_at >= week_start)
+            awaiting = sum(
+                1 for it in items
+                if it.status == "sent" and (it.sent_at or it.created_at) <= cutoff
+                and not it.dedup_key.startswith("[followup] ")
+            )
+            flags = [r.flag for r in replies if r.flag != "neutral" and not r.confirmed]
+        lines = [
+            f"{sent} sent this week",
+            f"{replied} replied",
+            f"{awaiting} awaiting follow-up",
+        ]
+        if flags:
+            lines.append("Flagged for your glance: " + ", ".join(sorted(set(flags))))
+        return Card(headline="Weekly outreach digest", lines=lines)
+
     async def _run_apply_weekly(self) -> None:
-        """Weekly internship batch: stage cold-email drafts AND job-board postings,
-        then post approval cards for each. NEVER sends/submits — that stays behind
-        Bo's approval tap."""
+        """Weekly internship outreach (Phase 1 batch + Phase 2 postings + Phase 3
+        sweep). Order: (1) read-only reply detection, (2) stage follow-ups (no
+        send), (3) stage the new cold-email + posting batch, (4) post the digest +
+        approval cards. NEVER sends/submits — every send stays behind Bo's tap."""
         try:
             import os
             from dispatch import apply as apply_mod
+            # Phase 3: read-only reply detection + follow-up staging (no send).
+            reply_summary = apply_mod.match_replies()
+            followup_summary = await apply_mod.stage_followups()
+            # Phase 1 + 2: new cold-email + posting batch (staged, never sent/submitted).
             email_summary = await apply_mod.run_apply("")
             posting_summary = await apply_mod.run_postings("")
             chat = os.getenv("TELEGRAM_CHAT_ID", "").strip()
             if chat:
                 from routes.telegram import send_apply_cards, send_posting_cards
+                from dispatch.cards import send_card
                 from dispatch import dispatcher
                 from dispatch.telegram_format import format_telegram
+                send_card(int(chat), self._digest_card())
                 n_email = send_apply_cards(int(chat))
                 n_post = send_posting_cards(int(chat))
                 staged = email_summary.get("staged", 0) + posting_summary.get("staged", 0)
-                dropped = email_summary.get("dropped", 0) + posting_summary.get("dropped", 0)
                 dispatcher.send_telegram_message(
                     int(chat),
                     format_telegram(
-                        f"Weekly applier: staged {staged} application(s) "
-                        f"({n_email} email, {n_post} posting), {dropped} dropped. "
+                        f"Weekly applier: {reply_summary.get('matched', 0)} new repl(ies), "
+                        f"staged {followup_summary.get('staged', 0)} follow-up(s) + "
+                        f"{staged} new application(s) ({n_email} email, {n_post} posting). "
                         f"Approve each with the buttons."
                     ),
                 )
-                print(f"[scheduler] apply-weekly: {n_email + n_post} card(s)")
+                print(f"[scheduler] apply-weekly: {n_email + n_post} card(s), "
+                      f"{reply_summary.get('matched', 0)} repl(ies)")
             else:
                 staged = email_summary.get("staged", 0) + posting_summary.get("staged", 0)
-                print(f"[scheduler] apply-weekly: staged {staged} (no chat configured)")
+                print(f"[scheduler] apply-weekly: staged {staged}, "
+                      f"{reply_summary.get('matched', 0)} repl(ies) (no chat configured)")
         except Exception as e:
             print(f"[scheduler] apply-weekly error: {e}")
 
