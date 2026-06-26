@@ -41,6 +41,7 @@ AGENT_REGISTRY: dict[str, dict] = {
     "researcher": {"long_id": "researcher"},
     "adset":      {"long_id": "adset-optimizer"},
     "planner":    {"long_id": "planner"},
+    "applier":    {"long_id": "applier"},
     # Finance gets a fixed workdir (not pane-prefixed) so its CLAUDE.md +
     # BRIEF_FORMAT.md specs travel with the agent rather than per pane.
     "finance":    {

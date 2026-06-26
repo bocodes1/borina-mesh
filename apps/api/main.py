@@ -33,6 +33,7 @@ import agents.qa_director  # noqa
 import agents.finance  # noqa
 import agents.planner  # noqa
 import agents.builder  # noqa
+import agents.applier  # noqa
 
 load_dotenv()
 

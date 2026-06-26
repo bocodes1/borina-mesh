@@ -29,6 +29,7 @@ SHORT_TO_LONG = {
     "inbox": "inbox-triage",
     "finance": "finance",
     "planner": "planner",
+    "applier": "applier",
 }
 LONG_TO_SHORT = {v: k for k, v in SHORT_TO_LONG.items()}
 
@@ -41,6 +42,7 @@ ROSTER_SEED: dict[str, str] = {
     "inbox-triage": ACTIVE,
     "ceo": ACTIVE,
     "researcher": ACTIVE,
+    "applier": ACTIVE,
     "adset-optimizer": PARKED,
     "ecommerce-scout": PARKED,
     "polymarket-intel": RETIRED,
