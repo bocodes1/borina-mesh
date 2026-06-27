@@ -66,4 +66,8 @@ def _isolate_fs_env(monkeypatch):
     import agents.runner_v2 as _runner_v2
 
     monkeypatch.setattr(_runner_v2, "_workdir_root", lambda: _TEST_REPORTS / "agents")
+    # Finance data-source keys live in .env (loaded via load_dotenv); clear them
+    # so connectivity tests stay hermetic. Tests that need a key set it in-body.
+    for _key in ("MARKET_DATA_API_KEY", "FMP_API_KEY", "POLYGON_API_KEY", "FRED_API_KEY"):
+        monkeypatch.delenv(_key, raising=False)
     yield

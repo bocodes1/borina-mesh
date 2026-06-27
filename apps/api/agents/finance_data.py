@@ -313,8 +313,10 @@ class FredClient:
 
 
 class FmpClient:
-    BASE = "https://financialmodelingprep.com/api/v3"
-    BASE_V4 = "https://financialmodelingprep.com/api/v4"
+    # FMP /stable API. Legacy /api/v3 + /api/v4 were retired for accounts
+    # created after 2025-08-31; everything below lives under /stable and keys
+    # the ticker via a `symbol` query param (not a path segment).
+    BASE = "https://financialmodelingprep.com/stable"
 
     def __init__(self) -> None:
         self._key = os.environ.get("FMP_API_KEY", "").strip()
@@ -324,12 +326,12 @@ class FmpClient:
     def configured(self) -> bool:
         return bool(self._key)
 
-    def _get(self, path: str, *, base: str = BASE, **params) -> Any:
+    def _get(self, path: str, **params) -> Any:
         if not self._key:
             raise DataSourceError("fmp", "missing_key", "set FMP_API_KEY in .env")
         params["apikey"] = self._key
         try:
-            r = self._client.get(f"{base}/{path}", params=params)
+            r = self._client.get(f"{self.BASE}/{path}", params=params)
         except httpx.HTTPError as e:
             raise DataSourceError("fmp", "transport_error", str(e)) from e
         if r.status_code == 429:
@@ -341,53 +343,80 @@ class FmpClient:
         except ValueError as e:
             raise DataSourceError("fmp", "parse_error", str(e)) from e
 
+    @staticmethod
+    def _recent_quarter() -> tuple[int, int]:
+        """Most recent calendar quarter likely to have a filed 13F summary.
+
+        13F filings lag ~45 days, so step back one quarter from today — the
+        /stable institutional-ownership endpoints require explicit year+quarter.
+        """
+        today = date.today()
+        quarter = (today.month - 1) // 3 + 1
+        year = today.year
+        quarter -= 1
+        if quarter == 0:
+            quarter = 4
+            year -= 1
+        return year, quarter
+
     def quote(self, ticker: str) -> dict:
         """Latest quote: price, market cap, P/E, EPS, change %."""
-        data = self._get(f"quote/{ticker}")
+        data = self._get("quote", symbol=ticker)
         if isinstance(data, list) and data:
             return data[0]
         raise DataSourceError("fmp", "not_found", ticker)
 
     def key_metrics_ttm(self, ticker: str) -> dict:
         """Trailing-twelve-month metrics: P/E, EV/EBITDA, P/S, etc."""
-        data = self._get(f"key-metrics-ttm/{ticker}")
+        data = self._get("key-metrics-ttm", symbol=ticker)
         if isinstance(data, list) and data:
             return data[0]
         raise DataSourceError("fmp", "not_found", ticker)
 
     def key_metrics_history(self, ticker: str, years: int = 10) -> list[dict]:
         """Annual key metrics for the last N years (for 5/10-year medians)."""
-        data = self._get(f"key-metrics/{ticker}", limit=years)
+        data = self._get("key-metrics", symbol=ticker, period="annual", limit=years)
         if isinstance(data, list):
             return data
         raise DataSourceError("fmp", "parse_error", str(type(data)))
 
     def income_statement_history(self, ticker: str, years: int = 5) -> list[dict]:
         """Annual income statements — for revenue/margin trajectory."""
-        data = self._get(f"income-statement/{ticker}", limit=years)
+        data = self._get("income-statement", symbol=ticker, period="annual", limit=years)
         if isinstance(data, list):
             return data
         raise DataSourceError("fmp", "parse_error", str(type(data)))
 
     def peers(self, ticker: str) -> list[str]:
-        """3-5 closest competitors by FMP's classification."""
-        data = self._get(f"stock_peers", base=self.BASE_V4, symbol=ticker)
-        if isinstance(data, list) and data:
-            entry = data[0] if isinstance(data[0], dict) else {}
-            return list(entry.get("peersList", []))[:5]
+        """3-5 closest competitors by FMP's classification.
+
+        /stable/stock-peers returns a flat list of peer objects (each with a
+        `symbol`), not the legacy {peersList: [...]} envelope.
+        """
+        data = self._get("stock-peers", symbol=ticker)
+        if isinstance(data, list):
+            return [d.get("symbol") for d in data if isinstance(d, dict) and d.get("symbol")][:5]
         return []
 
     def earnings_calendar(self, ticker: str) -> Optional[date]:
-        """Next earnings date for a ticker, or None if none upcoming."""
-        today = date.today().isoformat()
-        future = (date.today() + timedelta(days=120)).isoformat()
-        data = self._get("earning_calendar", **{"from": today, "to": future, "symbol": ticker})
-        if isinstance(data, list) and data:
+        """Next earnings date for a ticker, or None if none upcoming.
+
+        /stable/earnings returns past + future rows for the symbol; pick the
+        nearest date on/after today.
+        """
+        data = self._get("earnings", symbol=ticker)
+        if not isinstance(data, list):
+            return None
+        today = date.today()
+        upcoming: list[date] = []
+        for e in data:
             try:
-                return date.fromisoformat(data[0].get("date", "")[:10])
+                d = date.fromisoformat((e.get("date") or "")[:10])
             except ValueError:
-                return None
-        return None
+                continue
+            if d >= today:
+                upcoming.append(d)
+        return min(upcoming) if upcoming else None
 
     def days_to_earnings(self, ticker: str) -> Optional[int]:
         """Days until next earnings, or None if unknown."""
@@ -398,12 +427,13 @@ class FmpClient:
 
     def institutional_ownership_change(self, ticker: str) -> list[dict]:
         """Latest 13F-derived ownership changes (top adders/trimmers)."""
+        year, quarter = self._recent_quarter()
         try:
             data = self._get(
-                "institutional-ownership/symbol-ownership",
-                base=self.BASE_V4,
+                "institutional-ownership/symbol-positions-summary",
                 symbol=ticker,
-                includeCurrentQuarter="true",
+                year=year,
+                quarter=quarter,
             )
         except DataSourceError:
             return []
@@ -416,36 +446,50 @@ class FmpClient:
     def transcript(self, ticker: str, year: Optional[int] = None, quarter: Optional[int] = None) -> dict:
         """Earnings call transcript. Default: latest available.
 
-        FMP requires the $30+/mo plan for transcripts. On free/basic plans
-        this raises DataSourceError("missing_plan") — the caller should
-        skip the transcript section gracefully.
+        /stable/earning-call-transcript requires explicit year+quarter, so when
+        not supplied we resolve the most recent one via
+        earning-call-transcript-dates (returned newest-first). Transcripts need
+        a paid FMP plan; callers skip the section gracefully on error.
         """
-        params = {}
-        if year is not None:
-            params["year"] = year
-        if quarter is not None:
-            params["quarter"] = quarter
-        data = self._get(f"earning_call_transcript/{ticker}", **params)
+        if year is None or quarter is None:
+            dates = self._get("earning-call-transcript-dates", symbol=ticker)
+            if isinstance(dates, list) and dates:
+                latest = dates[0] if isinstance(dates[0], dict) else {}
+                year = latest.get("fiscalYear")
+                quarter = latest.get("quarter")
+            if year is None or quarter is None:
+                raise DataSourceError("fmp", "not_found", f"no transcript dates for {ticker}")
+        data = self._get("earning-call-transcript", symbol=ticker, year=year, quarter=quarter)
         if isinstance(data, list) and data:
             return data[0]
         if isinstance(data, dict):
             return data
-        raise DataSourceError("fmp", "missing_plan", "transcripts require FMP $30+/mo plan")
+        raise DataSourceError("fmp", "missing_plan", "transcripts require an FMP paid plan")
 
     def earnings_history(self, ticker: str, quarters: int = 4) -> list[dict]:
-        """Last N quarters of reported vs estimated EPS + revenue."""
-        data = self._get(f"earnings-surprises/{ticker}")
-        if isinstance(data, list):
-            return data[:quarters]
-        raise DataSourceError("fmp", "parse_error", str(type(data)))
+        """Last N quarters of reported vs estimated EPS.
+
+        /stable/earnings uses epsActual/epsEstimated; remap to the
+        actualEarningResult/estimatedEarning keys the renderer reads.
+        """
+        data = self._get("earnings", symbol=ticker)
+        if not isinstance(data, list):
+            raise DataSourceError("fmp", "parse_error", str(type(data)))
+        reported = [e for e in data if isinstance(e, dict) and e.get("epsActual") is not None]
+        return [
+            {
+                "date": e.get("date"),
+                "symbol": e.get("symbol"),
+                "actualEarningResult": e.get("epsActual"),
+                "estimatedEarning": e.get("epsEstimated"),
+            }
+            for e in reported[:quarters]
+        ]
 
     def analyst_estimates(self, ticker: str) -> dict:
-        """Consensus + revisions trend. Returns target_low/median/high + rev counts."""
-        try:
-            estimates = self._get(f"analyst-estimates/{ticker}", limit=4)
-            recs = self._get(f"upgrades-downgrades-consensus/{ticker}")
-        except DataSourceError:
-            raise
+        """Consensus + forward estimates. Distribution from /stable/grades-consensus."""
+        estimates = self._get("analyst-estimates", symbol=ticker, period="annual", limit=4)
+        recs = self._get("grades-consensus", symbol=ticker)
         consensus = recs[0] if isinstance(recs, list) and recs else {}
         return {
             "consensus_recommendation": consensus.get("consensus"),
@@ -458,22 +502,34 @@ class FmpClient:
         }
 
     def upgrades_downgrades(self, ticker: str, limit: int = 20) -> list[dict]:
-        """Recent sell-side upgrades/downgrades."""
+        """Recent sell-side upgrades/downgrades from /stable/grades.
+
+        Remap date/gradingCompany to the publishedDate/analystCompany keys the
+        renderer reads; priceTarget isn't provided by this endpoint.
+        """
         try:
-            data = self._get(
-                "upgrades-downgrades",
-                base=self.BASE_V4,
-                symbol=ticker,
-                limit=limit,
-            )
+            data = self._get("grades", symbol=ticker, limit=limit)
         except DataSourceError:
             return []
-        return data if isinstance(data, list) else []
+        if not isinstance(data, list):
+            return []
+        return [
+            {
+                "publishedDate": g.get("date"),
+                "analystCompany": g.get("gradingCompany"),
+                "previousGrade": g.get("previousGrade"),
+                "newGrade": g.get("newGrade"),
+                "priceTarget": None,
+                "action": g.get("action"),
+            }
+            for g in data
+            if isinstance(g, dict)
+        ]
 
     def institutional_holders(self, ticker: str, top_n: int = 10) -> list[dict]:
         """Top N institutional holders + position size from 13F."""
         try:
-            data = self._get(f"institutional-holder/{ticker}")
+            data = self._get("institutional-ownership/holder", symbol=ticker)
         except DataSourceError:
             return []
         if isinstance(data, list):
@@ -489,12 +545,7 @@ class FmpClient:
     def insider_trades(self, ticker: str, days_back: int = 180) -> list[dict]:
         """Form 4 transactions in the last N days."""
         try:
-            data = self._get(
-                "insider-trading",
-                base=self.BASE_V4,
-                symbol=ticker,
-                page=0,
-            )
+            data = self._get("insider-trading/search", symbol=ticker, page=0)
         except DataSourceError:
             return []
         if not isinstance(data, list):
@@ -511,34 +562,25 @@ class FmpClient:
         return recent
 
     def segment_breakdown(self, ticker: str) -> dict:
-        """Revenue by segment + by geography (latest annual)."""
+        """Revenue by segment + by geography (latest annual).
+
+        /stable segmentation rows nest the values under a `data` key.
+        """
         try:
-            by_segment = self._get(
-                f"revenue-product-segmentation",
-                base=self.BASE_V4,
-                symbol=ticker,
-                structure="flat",
-                period="annual",
-            )
-            by_region = self._get(
-                f"revenue-geographic-segmentation",
-                base=self.BASE_V4,
-                symbol=ticker,
-                structure="flat",
-                period="annual",
-            )
+            by_segment = self._get("revenue-product-segmentation", symbol=ticker)
+            by_region = self._get("revenue-geographic-segmentation", symbol=ticker)
         except DataSourceError:
             return {"segments": {}, "regions": {}}
         latest_segment = by_segment[0] if isinstance(by_segment, list) and by_segment else {}
         latest_region = by_region[0] if isinstance(by_region, list) and by_region else {}
         return {
-            "segments": next(iter(latest_segment.values()), {}) if latest_segment else {},
-            "regions": next(iter(latest_region.values()), {}) if latest_region else {},
+            "segments": latest_segment.get("data", {}) if isinstance(latest_segment, dict) else {},
+            "regions": latest_region.get("data", {}) if isinstance(latest_region, dict) else {},
         }
 
     def company_profile(self, ticker: str) -> dict:
         """Company profile: sector, industry, description, website, employees."""
-        data = self._get(f"profile/{ticker}")
+        data = self._get("profile", symbol=ticker)
         if isinstance(data, list) and data:
             return data[0]
         raise DataSourceError("fmp", "not_found", ticker)
