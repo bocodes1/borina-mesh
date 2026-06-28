@@ -88,3 +88,35 @@ def test_latest_artifact_for_agent_returns_newest_body(tmp_path, monkeypatch):
 def test_latest_artifact_for_agent_none(tmp_path, monkeypatch):
     monkeypatch.setenv("REPORTS_DIR", str(tmp_path))
     assert latest_artifact_for_agent("researcher") == ""
+
+
+def test_save_run_output_persists_markdown_even_with_pdf(tmp_path, monkeypatch):
+    """In production weasyprint produces a PDF, but the last-artifact reader
+    globs ``<agent>-*.md``. ``save_run_output`` must ALWAYS also persist the
+    clean markdown body next to the PDF so ``latest_artifact_for_agent`` (used
+    for context-pack grounding) finds real content on the live box."""
+    import artifacts
+
+    monkeypatch.setenv("REPORTS_DIR", str(tmp_path))
+    monkeypatch.delenv("OBSIDIAN_VAULT_PATH", raising=False)
+
+    # Simulate production: PDF generation succeeds (weasyprint installed).
+    def _fake_pdf(pdf_path, **kwargs):
+        Path(pdf_path).write_bytes(b"%PDF-fake")
+        return True
+
+    monkeypatch.setattr(artifacts, "_try_generate_pdf", _fake_pdf)
+
+    path = artifacts.save_run_output(
+        agent_id="researcher",
+        job_id=7,
+        prompt="do the thing",
+        output="grounded digest body",
+        status="completed",
+    )
+
+    # PDF stays the primary artifact (behavior unchanged).
+    assert path is not None and path.suffix == ".pdf"
+    # The markdown sibling now exists and the reader returns its body.
+    body = latest_artifact_for_agent("researcher")
+    assert "grounded digest body" in body
