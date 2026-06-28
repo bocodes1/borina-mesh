@@ -7,12 +7,18 @@ enriched with a `type` (extension) and a `source` — which scheduled task / age
 produced it, or "uploaded" — inferred from the sidecar meta or the filename.
 """
 import re
+from datetime import date, timedelta
 
 from fastapi import APIRouter, Query
 
 from artifacts import list_artifacts
 
 router = APIRouter(prefix="/files", tags=["files"])
+
+# Don't ship the entire ~2,700-file registry on every request: default to the
+# last week, capped at the newest `_DEFAULT_LIMIT` files.
+_DEFAULT_LIMIT = 200
+_DEFAULT_WINDOW_DAYS = 7
 
 # Filename-prefix → (source label, agent) for files without a meta sidecar.
 _PREFIX_SOURCES: list[tuple[str, str, str]] = [
@@ -70,8 +76,20 @@ def list_files(
     source: str | None = Query(None),
     type: str | None = Query(None),
     q: str | None = Query(None),
+    since: str | None = Query(
+        None, description="ISO date (YYYY-MM-DD); defaults to 7 days ago"
+    ),
+    limit: int = Query(_DEFAULT_LIMIT, ge=1, le=5000),
 ):
-    files = [_enrich(a) for a in list_artifacts()]
+    cutoff = since or (date.today() - timedelta(days=_DEFAULT_WINDOW_DAYS)).isoformat()
+    # `list_artifacts()` is the only registry scan — call it once. It's already
+    # sorted newest-date-first, so window by date then cap to `limit`.
+    windowed = [a for a in list_artifacts() if a.date >= cutoff][:limit]
+    files = [_enrich(a) for a in windowed]
+
+    # distinct facets for the UI filters (from the windowed, pre-filter set)
+    sources = sorted({f["source"] for f in files})
+    types = sorted({f["type"] for f in files})
 
     if source and source != "all":
         files = [f for f in files if f["source"] == source]
@@ -84,8 +102,4 @@ def list_files(
     # newest first
     files.sort(key=lambda f: (f["date"], f["modified"]), reverse=True)
 
-    # distinct facets for the UI filters (from the unfiltered set)
-    allf = [_enrich(a) for a in list_artifacts()]
-    sources = sorted({f["source"] for f in allf})
-    types = sorted({f["type"] for f in allf})
     return {"files": files, "sources": sources, "types": types, "count": len(files)}

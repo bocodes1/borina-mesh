@@ -16,7 +16,7 @@ import json
 import re
 from typing import Callable, Optional
 
-MISSION_AGENTS = {"researcher", "trader", "polymarket", "finance", "scout", "inbox", "adset"}
+MISSION_AGENTS = {"researcher", "trader", "finance", "scout", "inbox", "adset"}
 MAX_SUBTASKS = 4
 _RESULT_CAP = 4000  # chars of each subtask result fed to synthesis
 

@@ -9,7 +9,6 @@ from __future__ import annotations
 _DEFAULT_CRONS = {
     "ceo": "0 7 * * *",
     "ecommerce-scout": "0 8 * * *",
-    "polymarket-intel": "0 8 * * *",
     "researcher": "0 8 * * *",
     "adset-optimizer": "0 17 * * *",
     "trader": "*/30 * * * *",

@@ -57,3 +57,21 @@ def test_task_chips_reflect_due_tasks():
     r = client.get("/calendar/events", params={"from": "2026-06-01T00:00:00", "to": "2026-06-30T00:00:00"})
     chips = r.json()["task_chips"]
     assert any(c["kind"] == "task" and "Quarterly review" in c["title"] for c in chips)
+
+
+def test_task_chips_window_compares_instants_not_iso_strings():
+    """The window must be parsed as datetimes. A due exactly at the lower bound
+    ("...00:00:00") is lexicographically *less* than the frontend's
+    "...00:00:00.000Z" bound (so raw-string `<=` wrongly excludes it), yet it's
+    the same instant — datetime comparison must include it."""
+    client.post(
+        "/tasks",
+        json={"title": "Boundary task", "tag": "work", "due": "2026-07-10T00:00:00"},
+    )
+    # Window uses 'Z' / millisecond precision like the frontend's toISOString().
+    r = client.get(
+        "/calendar/events",
+        params={"from": "2026-07-10T00:00:00.000Z", "to": "2026-07-11T00:00:00.000Z"},
+    )
+    chips = r.json()["task_chips"]
+    assert any("Boundary task" in c["title"] for c in chips)

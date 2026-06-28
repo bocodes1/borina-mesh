@@ -37,7 +37,6 @@ AGENT_REGISTRY: dict[str, dict] = {
     "inbox":      {"long_id": "inbox-triage"},
     "scout":      {"long_id": "ecommerce-scout"},
     "ceo":        {"long_id": "ceo"},
-    "polymarket": {"long_id": "polymarket-intel"},
     "researcher": {"long_id": "researcher"},
     "adset":      {"long_id": "adset-optimizer"},
     "planner":    {"long_id": "planner"},

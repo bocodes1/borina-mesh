@@ -33,7 +33,7 @@ def test_status_command_reports_fleet(monkeypatch):
     assert res["status"] == "status"
     assert len(sent) == 1
     # Every registered agent appears in the reply.
-    for agent in ("researcher", "trader", "polymarket", "ceo"):
+    for agent in ("researcher", "trader", "ceo"):
         assert agent in sent[0]
 
 

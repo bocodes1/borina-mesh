@@ -27,7 +27,6 @@ def test_decided_states():
     assert fr.get_state("researcher") == fr.ACTIVE
     assert fr.get_state("adset-optimizer") == fr.PARKED
     assert fr.get_state("ecommerce-scout") == fr.PARKED
-    assert fr.get_state("polymarket-intel") == fr.RETIRED
     assert fr.get_state("qa_director") == fr.RETIRED
 
 
@@ -35,14 +34,13 @@ def test_short_alias_bridges_to_long_id():
     # get_state accepts the intent short alias too.
     assert fr.get_state("scout") == fr.PARKED          # scout -> ecommerce-scout
     assert fr.get_state("adset") == fr.PARKED
-    assert fr.get_state("polymarket") == fr.RETIRED    # -> polymarket-intel
 
 
 def test_routable_rules():
     assert fr.is_routable("trader") is True
     assert fr.is_routable("scout", direct=False) is False   # parked, keyword off
     assert fr.is_routable("scout", direct=True) is True      # parked, explicit on
-    assert fr.is_routable("polymarket", direct=True) is False # retired, never
+    assert fr.is_routable("qa_director", direct=True) is False # retired, never
 
 
 def test_parked_agent_not_keyword_routed():
@@ -59,9 +57,9 @@ def test_parked_agent_still_directly_addressable():
     assert intent.dispatchable is True
 
 
-def test_retired_agent_keyword_falls_through():
-    intent = resolve_intent("what are the polymarket odds today")
-    assert intent.agent == "researcher"      # polymarket-intel retired
+def test_unmatched_keyword_falls_through_to_researcher():
+    intent = resolve_intent("what are the prediction market odds today")
+    assert intent.agent == "researcher"      # no specialist claims it
     assert intent.dispatchable is True
 
 
@@ -78,11 +76,11 @@ def test_set_state_changes_routing():
 
 
 def test_active_scheduled_filter():
-    defaults = {"trader": "*/30 * * * *", "polymarket-intel": "0 8 * * *",
+    defaults = {"trader": "*/30 * * * *", "qa_director": "0 8 * * *",
                 "adset-optimizer": "0 17 * * *", "ceo": "0 7 * * *"}
     active = fr.active_scheduled_agents(defaults)
     assert "trader" in active and "ceo" in active
-    assert "polymarket-intel" not in active   # retired
+    assert "qa_director" not in active   # retired
     assert "adset-optimizer" not in active     # parked
 
 

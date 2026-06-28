@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 # Registered short agent ids (mirror agents/runner_v2.AGENT_REGISTRY).
-KNOWN_AGENTS = {"trader", "inbox", "scout", "ceo", "polymarket", "researcher", "adset", "finance"}
+KNOWN_AGENTS = {"trader", "inbox", "scout", "ceo", "researcher", "adset", "finance"}
 
 
 @dataclass
@@ -130,7 +130,7 @@ def _alias_match(text: str) -> Optional[Intent]:
     # Direct addressing: "<agent>: <task>" / "<agent>, <task>" — Bo picks the
     # agent explicitly (Telegram fleet control).
     direct = re.match(
-        r"^\s*(trader|inbox|scout|ceo|polymarket|researcher|adset|finance)\s*[:,]\s+(.+)$",
+        r"^\s*(trader|inbox|scout|ceo|researcher|adset|finance)\s*[:,]\s+(.+)$",
         low, re.DOTALL,
     )
     if direct:
@@ -154,7 +154,6 @@ def _alias_match(text: str) -> Optional[Intent]:
         )
 
     table = [
-        (r"\b(polymarket|prediction market|odds)\b", "polymarket", "market_scan"),
         (r"\b(scout|product|ecommerce|kalodata|winning product)\b", "scout", "product_scan"),
         (r"\b(adset|ad set|campaign|ad spend|roas)\b", "adset", "ad_review"),
         (r"\b(inbox|email|triage|messages?)\b", "inbox", "inbox_triage"),

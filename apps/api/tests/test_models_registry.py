@@ -5,7 +5,7 @@ from agents.models import AGENT_MODELS, resolve_model
 from main import app
 
 def test_registry_contains_all_agents():
-    expected = {"ceo", "researcher", "ecommerce-scout", "polymarket-intel",
+    expected = {"ceo", "researcher", "ecommerce-scout",
                 "qa_director", "trader", "adset-optimizer", "inbox-triage"}
     assert expected.issubset(AGENT_MODELS.keys())
 

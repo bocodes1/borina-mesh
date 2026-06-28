@@ -3,7 +3,6 @@ from fastapi.testclient import TestClient
 from sqlmodel import Session
 import agents.ceo  # noqa
 import agents.scout  # noqa
-import agents.polymarket  # noqa
 import agents.researcher  # noqa
 import agents.trader  # noqa
 import agents.adset  # noqa

@@ -79,6 +79,18 @@ class SchedulerService:
     def list_schedules(self) -> dict[str, str]:
         return dict(self._schedules)
 
+    @staticmethod
+    def _roster_active(agent_id: str) -> bool:
+        """Roster gate for the dedicated register_* methods (§A4). Mirrors how
+        register_defaults uses active_scheduled_agents: only ACTIVE agents
+        schedule. Unknown ids default to active (fail-open for new infra jobs).
+        Any error fails open so a roster glitch never silently kills a brief."""
+        try:
+            from fleet_roster import get_state, ACTIVE
+            return get_state(agent_id) == ACTIVE
+        except Exception:  # noqa: BLE001
+            return True
+
     def register_defaults(self) -> None:
         """Register the default daily schedules for agents that don't have one yet."""
         # Master schedule list extracted from the Obsidian vault
@@ -88,18 +100,20 @@ class SchedulerService:
         # One default cron per agent — secondary jobs noted in comments.
         DEFAULT_SCHEDULES = {
             # ── Morning routines ───────────────────────────────────────────
-            "ceo":               "0 7 * * *",    # 7 AM daily  — strategic morning briefing (CO_WORKING_SYSTEM.md)
+            # NOTE (efficiency overhaul §A3): the `ceo` 7am and `researcher` 8am
+            # crons were REMOVED — they produced redundant morning narratives for
+            # the same day. The single surviving morning brief is the 6:30 planner
+            # (register_planner), which sends the Telegram digest Bo reads.
             "ecommerce-scout":   "0 8 * * *",    # 8 AM daily  — KaloData product discovery (borina-bot.md)
-            "polymarket-intel":  "0 8 * * *",    # 8 AM daily  — leaderboard/whale + signal synthesis (ARCHITECTURE.md)
-            "researcher":        "0 8 * * *",    # 8 AM daily  — morning briefing aggregator (automation_systems.md)
             # ── Ad operations ──────────────────────────────────────────────
             # adset-optimizer also owns the 6 PM GMC analytics report and the
             # 9 AM GMC product-rotation job (gmc-cron-setup.md / ARCHITECTURE.md).
             "adset-optimizer":   "0 17 * * *",   # 5 PM daily  — GMC ad rotation (ARCHITECTURE.md L241)
             # ── Continuous monitoring ──────────────────────────────────────
-            # trader also owns: 11 PM daily metrics, 10 PM P&L summary,
-            # 2 PM verification check, 4 PM gym accountability ping.
-            "trader":            "*/30 * * * *", # Every 30 min — bot health watcher (borina-bot.md)
+            # NOTE (efficiency overhaul §A1): the `trader` */30 LLM cron was
+            # REMOVED — it spawned an Opus-reviewed agent every 30 min just to
+            # watch a bot. Replaced by the cheap non-LLM `register_trader_health`
+            # uptime ping below, which only messages Bo on failure.
             "inbox-triage":      "0 */2 * * *",  # Every 2 hours — email/Telegram digest (borina-bot.md)
             # "curator": DISABLED pending wiki v2 redesign — manual /wiki/review only
             # NOTE: weekly memory curator (Sun 10 AM ET = 14 UTC, CRON-SETUP.md)
@@ -142,6 +156,57 @@ class SchedulerService:
                 print("[scheduler] Registered default: wiki-daily-digest @ 0 8 * * *")
             except Exception as e:
                 print(f"[scheduler] Failed to register wiki digest: {e}")
+
+    async def _run_trader_health(self) -> None:
+        """Cheap NON-LLM uptime ping for the trading bot (replaces the old */30
+        Opus-reviewed `trader` agent cron, §A1). Hits the bot's health endpoint
+        and ONLY messages Bo on failure — a healthy bot stays silent (no cost, no
+        noise). No-ops when no health URL is configured, so it's inert in dev/CI."""
+        import os
+        url = os.getenv("TRADER_BOT_HEALTH_URL", "").strip()
+        if not url:
+            return  # nothing to watch — stay silent
+        ok = False
+        detail = ""
+        try:
+            import httpx
+            resp = httpx.get(url, timeout=10.0)
+            ok = resp.status_code == 200
+            detail = f"HTTP {resp.status_code}"
+        except Exception as e:  # noqa: BLE001
+            detail = str(e)
+        if ok:
+            return  # healthy — no message
+        try:
+            chat = os.getenv("TELEGRAM_CHAT_ID", "").strip()
+            if chat:
+                from dispatch import dispatcher
+                from dispatch.telegram_format import format_telegram
+                dispatcher.send_telegram_message(
+                    int(chat),
+                    format_telegram(f"⚠️ Trading bot health check failed: {detail}"),
+                )
+            print(f"[scheduler] trader-health: DOWN ({detail})")
+        except Exception as e:  # noqa: BLE001
+            print(f"[scheduler] trader-health alert error: {e}")
+
+    def register_trader_health(self) -> None:
+        """Register the non-LLM trader uptime ping every 10 minutes (§A1)."""
+        job_id = "trader-health"
+        if self._scheduler.get_job(job_id):
+            return
+        try:
+            trigger = parse_cron("*/10 * * * *")
+            self._scheduler.add_job(
+                self._run_trader_health,
+                trigger=trigger,
+                id=job_id,
+                replace_existing=True,
+            )
+            self._schedules["trader-health"] = "*/10 * * * *"
+            print("[scheduler] Registered default: trader-health (non-LLM) @ */10")
+        except Exception as e:
+            print(f"[scheduler] Failed to register trader-health: {e}")
 
     async def _run_digest(self) -> None:
         """Run the wiki daily digest."""
@@ -214,7 +279,12 @@ class SchedulerService:
             print(f"[scheduler] planner error: {e}")
 
     def register_planner(self) -> None:
-        """Register the planner job at 6:30am America/New_York."""
+        """Register the planner job at 6:30am America/New_York — the single
+        consolidated morning brief (§A3). Honors the fleet roster (§A4): if
+        `planner` is parked/retired it does not schedule."""
+        if not self._roster_active("planner"):
+            print("[scheduler] planner not active in roster — skipping schedule")
+            return
         try:
             from zoneinfo import ZoneInfo
             tz = ZoneInfo("America/New_York")
@@ -238,6 +308,9 @@ class SchedulerService:
         agent-runner; finance has its own pre-screen step. Uses tz so the
         cron stays at 5am ET regardless of DST.
         """
+        if not self._roster_active("finance"):
+            print("[scheduler] finance not active in roster — skipping schedule")
+            return
         try:
             from zoneinfo import ZoneInfo
             tz = ZoneInfo("America/New_York")
@@ -400,13 +473,20 @@ class SchedulerService:
             print(f"[scheduler] operator {phase} error: {e}")
 
     def register_operator(self) -> None:
-        """Register the daily operator: morning 07:00, midday 13:00, eod 18:00 ET."""
+        """Register the daily operator: midday 13:00, eod 18:00 ET.
+
+        The `morning` phase was REMOVED (§A3) — it byte-for-byte duplicated the
+        6:30 planner brief. Honors the fleet roster (§A4): skips if `operator`
+        is parked/retired."""
+        if not self._roster_active("operator"):
+            print("[scheduler] operator not active in roster — skipping schedule")
+            return
         try:
             from zoneinfo import ZoneInfo
             tz = ZoneInfo("America/New_York")
         except Exception:
             tz = None
-        for phase, hour in (("morning", 7), ("midday", 13), ("eod", 18)):
+        for phase, hour in (("midday", 13), ("eod", 18)):
             job_id = f"operator-{phase}"
             if self._scheduler.get_job(job_id):
                 continue
@@ -465,7 +545,6 @@ class SchedulerService:
             "trader": "trader",
             "researcher": "researcher",
             "ecommerce-scout": "scout",
-            "polymarket-intel": "polymarket",
             "adset-optimizer": "adset",
             "inbox-triage": "inbox",
         }
@@ -491,46 +570,13 @@ class SchedulerService:
         except Exception as e:
             error_msg = str(e)
 
-        # QA gatekeeper — runs after a successful stream, retries once on REQUEST_RERUN
+        # NOTE (efficiency overhaul §A2): the post-run QADirector.review() Opus
+        # call was REMOVED from the scheduled/cron path. It was the entire
+        # recurring-Opus cost and added no operator-visible value for digest/health
+        # runs. Scheduled runs no longer carry a QA verdict. (Interactive
+        # dashboard-chat QA in chat.py is untouched and out of scope here.)
         qa_verdict = None
         qa_notes = None
-        if not error_msg:
-            try:
-                from agents.qa_director import QADirector, ReviewVerdict
-                qa = QADirector()
-                full_output = "".join(output_parts)
-                review = await qa.review(full_output, prompt)
-                qa_verdict = review.verdict.value
-                qa_notes = review.notes
-
-                if review.verdict == ReviewVerdict.REQUEST_RERUN:
-                    # Retry exactly once with QA feedback appended to prompt
-                    output_parts = []
-                    error_msg = None
-                    retry_prompt = f"{prompt}\n\n[QA rerun: {review.notes}]"
-                    try:
-                        if runner_id and runner_id in AGENT_REGISTRY:
-                            retry_result = await run_agent_task(runner_id, retry_prompt)
-                            if retry_result.ok:
-                                output_parts.append(retry_result.output)
-                            else:
-                                error_msg = retry_result.error
-                        else:
-                            async for chunk in agent.stream(retry_prompt, job_id=job_id):
-                                if chunk.get("type") == "text":
-                                    output_parts.append(chunk.get("content", ""))
-                                elif chunk.get("type") == "error":
-                                    error_msg = chunk.get("content", "unknown error")
-                    except Exception as e:
-                        error_msg = str(e)
-
-                    if not error_msg:
-                        full_output = "".join(output_parts)
-                        review2 = await qa.review(full_output, prompt)
-                        qa_verdict = review2.verdict.value
-                        qa_notes = review2.notes
-            except Exception as e:
-                qa_notes = f"QA review failed: {e}"
 
         with Session(engine) as session:
             final_job = session.get(Job, job_id)

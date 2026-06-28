@@ -7,7 +7,7 @@ Calendar create must refuse unless user_initiated=True.
 """
 import pytest
 
-from integrations import market_data, brokerage, wallet, weather, polymarket, google_calendar
+from integrations import market_data, brokerage, wallet, weather, google_calendar
 
 
 # ── not-connected when unkeyed (conftest leaves these env vars unset) ────────

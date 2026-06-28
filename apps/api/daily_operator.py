@@ -13,7 +13,7 @@ from __future__ import annotations
 import os
 from typing import Optional
 
-PHASES = ("morning", "midday", "eod")
+PHASES = ("midday", "eod")
 
 
 def _chat_id() -> Optional[int]:
@@ -24,73 +24,20 @@ def _chat_id() -> Optional[int]:
         return None
 
 
-def _proposed_calendar_items(day: str) -> list[dict]:
-    from planner import get_plan
-    plan = get_plan(day)
-    return [i for i in plan.get("items", []) if i.get("kind") == "calendar" and i.get("status") == "proposed"]
-
-
-def _proposed_task_items(day: str) -> list[dict]:
-    from planner import get_plan
-    plan = get_plan(day)
-    return [i for i in plan.get("items", []) if i.get("kind") == "task" and i.get("status") == "proposed"]
-
-
-def build_morning_card(day: str):
-    """An approval Card for the day's proposed calendar changes (or a plain
-    summary when there are none). Reuses the foundation Card channel."""
-    from dispatch.cards import Card, Action
-
-    cal = _proposed_calendar_items(day)
-    tasks = _proposed_task_items(day)
-    if not cal:
-        lines = [f"{len(tasks)} task(s) proposed for today."] if tasks else ["Nothing needs your sign-off."]
-        return Card(headline=f"Morning plan — {day}", lines=lines)
-
-    lines = [i.get("title", "(change)") for i in cal[:8]]
-    actions = [
-        Action(label="Approve all", data=f"op:approveall:{day}"),
-        Action(label="Skip", data=f"op:skip:{day}"),
-    ]
-    return Card(
-        headline=f"{len(cal)} calendar change(s) proposed — {day}",
-        lines=lines,
-        actions=actions,
-    )
-
-
 async def run_phase(phase: str, day: Optional[str] = None, *, send: bool = True):
     """Run one operator phase. Returns the Card it would send (also sent to
-    Telegram when `send` and a chat id is configured). No calendar writes."""
-    from planner import today_str, generate_plan_with_agent, get_plan
+    Telegram when `send` and a chat id is configured). No calendar writes.
+
+    The `morning` phase was REMOVED (§A3): it byte-for-byte duplicated the 6:30
+    planner brief (both called generate_plan_with_agent). The single morning
+    brief now lives in scheduler.register_planner. Only midday/eod remain here."""
+    from planner import today_str, get_plan
     from dispatch.cards import Card, send_card
 
     day = day or today_str()
     chat = _chat_id()
 
-    if phase == "morning":
-        # Stage the layered plan (proposals only — never writes).
-        try:
-            summary = await generate_plan_with_agent(day)
-        except Exception as e:  # noqa: BLE001
-            card = Card(headline=f"Morning plan — {day}", lines=[f"(plan generation failed: {e})"])
-            if send and chat:
-                send_card(chat, card)
-            return card
-        # Send the layered narrative (brief + threads + agenda) above the card.
-        if send and chat:
-            try:
-                from planner import plan_narrative_text
-                from dispatch.dispatcher import send_telegram_message
-                from dispatch.telegram_format import format_telegram
-                narrative = plan_narrative_text(day, summary)
-                if narrative:
-                    send_telegram_message(chat, format_telegram(narrative, max_lines=30))
-            except Exception as e:  # noqa: BLE001
-                print(f"[operator] morning narrative error: {e}")
-        card = build_morning_card(day)
-
-    elif phase == "midday":
+    if phase == "midday":
         plan = get_plan(day)
         pending = [i["title"] for i in plan.get("items", []) if i.get("status") == "proposed"]
         lines = ["Midday check."]
