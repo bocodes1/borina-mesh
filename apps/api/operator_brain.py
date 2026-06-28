@@ -186,7 +186,12 @@ async def update_profile(day: Optional[str] = None) -> dict:
     day = day or date.today().isoformat()
     current = read_profile()
     try:
+        from agents.context_pack import build_context_pack
+        from agents.contracts import last_artifact_text
         prompt = LEARNER_PROMPT.format(day=day, profile=current, **_gather_signals(day))
+        pack = build_context_pack("operator", query="operator profile day recap",
+                                  data="", last_artifact=last_artifact_text("operator"))
+        prompt = f"{prompt}\n\nCONTEXT:\n{pack.text}"
         candidate = await _call_agent(prompt)
     except Exception as exc:  # noqa: BLE001
         print(f"[operator_brain] learner failed: {exc}")
