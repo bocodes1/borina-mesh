@@ -180,9 +180,10 @@ def test_contracted_run_uses_clean_handoff_when_signal_changes(monkeypatch):
 # §A1 — trader LLM cron removed; cheap non-LLM uptime ping replaces it
 # ---------------------------------------------------------------------------
 
-def test_register_defaults_drops_trader_ceo_researcher_crons():
+def test_register_defaults_drops_trader_ceo_researcher_crons(monkeypatch):
     """§A1/§A3: no recurring LLM cron for trader, ceo, or researcher; the 2h
-    inbox-triage digest survives."""
+    inbox-triage digest survives (when Microsoft OAuth is configured)."""
+    monkeypatch.setenv("MICROSOFT_OAUTH_CLIENT_ID", "x")
     import agents.inbox, agents.trader, agents.ceo, agents.researcher  # noqa: F401  populate registry
     from db import engine
     import fleet_roster as fr
@@ -195,6 +196,30 @@ def test_register_defaults_drops_trader_ceo_researcher_crons():
     assert "ceo" not in sched
     assert "researcher" not in sched
     assert "inbox-triage" in sched
+
+
+def test_inbox_triage_cron_skipped_without_msoauth(monkeypatch):
+    monkeypatch.delenv("MICROSOFT_OAUTH_CLIENT_ID", raising=False)
+    import agents.inbox  # noqa: F401  populate registry
+    from db import engine
+    import fleet_roster as fr
+    fr.seed_roster(engine)
+    from scheduler import SchedulerService
+    svc = SchedulerService()
+    svc.register_defaults()
+    assert "inbox-triage" not in svc._schedules
+
+
+def test_inbox_triage_cron_registered_with_msoauth(monkeypatch):
+    monkeypatch.setenv("MICROSOFT_OAUTH_CLIENT_ID", "x")
+    import agents.inbox  # noqa: F401  populate registry
+    from db import engine
+    import fleet_roster as fr
+    fr.seed_roster(engine)
+    from scheduler import SchedulerService
+    svc = SchedulerService()
+    svc.register_defaults()
+    assert "inbox-triage" in svc._schedules
 
 
 @pytest.mark.asyncio

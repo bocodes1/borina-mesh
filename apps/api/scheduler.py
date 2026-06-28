@@ -128,8 +128,12 @@ class SchedulerService:
             schedules = active_scheduled_agents(DEFAULT_SCHEDULES)
         except Exception:  # noqa: BLE001
             schedules = DEFAULT_SCHEDULES
+        import os
         for agent_id, cron in schedules.items():
             if not registry.get(agent_id):
+                continue
+            if agent_id == "inbox-triage" and not os.getenv("MICROSOFT_OAUTH_CLIENT_ID"):
+                print("[scheduler] inbox-triage cron skipped — Microsoft OAuth not configured")
                 continue
             if agent_id in self._schedules:
                 continue
