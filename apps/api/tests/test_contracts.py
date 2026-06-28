@@ -1,5 +1,7 @@
 from pathlib import Path
 from agents import contracts
+from agents import contracts as C
+from agents.context_pack import ContextPack
 import artifacts
 
 
@@ -29,3 +31,18 @@ def test_load_task_spec_missing_returns_none(tmp_path, monkeypatch):
 
 def test_contracted_set_has_active_agents():
     assert {"researcher", "planner", "operator"} <= contracts.CONTRACTED
+
+
+def test_should_skip_when_signal_unchanged(tmp_path, monkeypatch):
+    wd = tmp_path / "researcher"; wd.mkdir()
+    monkeypatch.setattr(C, "agent_workdir", lambda sid: wd)
+    assert C.should_skip("researcher", "abc123") is False      # first run, no prior
+    C.write_last_signal("researcher", "abc123")
+    assert C.should_skip("researcher", "abc123") is True       # unchanged
+    assert C.should_skip("researcher", "def456") is False      # changed
+
+
+def test_empty_signal_always_skips(tmp_path, monkeypatch):
+    wd = tmp_path / "trader"; wd.mkdir()
+    monkeypatch.setattr(C, "agent_workdir", lambda sid: wd)
+    assert C.should_skip("trader", ContextPack.EMPTY_SIGNAL) is True

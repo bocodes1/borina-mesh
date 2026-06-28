@@ -32,3 +32,32 @@ def last_artifact_text(agent_id: str, *, max_chars: int = 1500) -> str:
         return body.strip()[:max_chars]
     except Exception:
         return ""
+
+
+from agents.context_pack import ContextPack
+
+
+def _signal_path(short_id: str):
+    return agent_workdir(short_id) / ".last_signal"
+
+
+def read_last_signal(short_id: str) -> str:
+    try:
+        return _signal_path(short_id).read_text().strip()
+    except OSError:
+        return ""
+
+
+def write_last_signal(short_id: str, sig: str) -> None:
+    try:
+        p = _signal_path(short_id)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(sig)
+    except OSError:
+        pass
+
+
+def should_skip(short_id: str, sig: str) -> bool:
+    if sig == ContextPack.EMPTY_SIGNAL:
+        return True
+    return sig == read_last_signal(short_id)
