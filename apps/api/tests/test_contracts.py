@@ -1,5 +1,17 @@
 from pathlib import Path
 from agents import contracts
+import artifacts
+
+
+def test_last_artifact_text_truncates_at_max_chars(monkeypatch):
+    monkeypatch.setattr(artifacts, "latest_artifact_for_agent", lambda aid: "x" * 5000)
+    out = contracts.last_artifact_text("researcher", max_chars=100)
+    assert out == "x" * 100
+
+
+def test_last_artifact_text_empty_returns_empty_string(monkeypatch):
+    monkeypatch.setattr(artifacts, "latest_artifact_for_agent", lambda aid: "")
+    assert contracts.last_artifact_text("researcher") == ""
 
 
 def test_load_task_spec_reads_taskmd(tmp_path, monkeypatch):
