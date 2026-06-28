@@ -184,6 +184,7 @@ def test_register_defaults_drops_trader_ceo_researcher_crons(monkeypatch):
     """§A1/§A3: no recurring LLM cron for trader, ceo, or researcher; the 2h
     inbox-triage digest survives (when Microsoft OAuth is configured)."""
     monkeypatch.setenv("MICROSOFT_OAUTH_CLIENT_ID", "x")
+    monkeypatch.setenv("MICROSOFT_OAUTH_CLIENT_SECRET", "y")
     import agents.inbox, agents.trader, agents.ceo, agents.researcher  # noqa: F401  populate registry
     from db import engine
     import fleet_roster as fr
@@ -199,7 +200,10 @@ def test_register_defaults_drops_trader_ceo_researcher_crons(monkeypatch):
 
 
 def test_inbox_triage_cron_skipped_without_msoauth(monkeypatch):
-    monkeypatch.delenv("MICROSOFT_OAUTH_CLIENT_ID", raising=False)
+    # A real Microsoft connection needs BOTH client id and secret. Client id
+    # alone is not enough, so the cron must stay skipped.
+    monkeypatch.setenv("MICROSOFT_OAUTH_CLIENT_ID", "x")
+    monkeypatch.delenv("MICROSOFT_OAUTH_CLIENT_SECRET", raising=False)
     import agents.inbox  # noqa: F401  populate registry
     from db import engine
     import fleet_roster as fr
@@ -212,6 +216,7 @@ def test_inbox_triage_cron_skipped_without_msoauth(monkeypatch):
 
 def test_inbox_triage_cron_registered_with_msoauth(monkeypatch):
     monkeypatch.setenv("MICROSOFT_OAUTH_CLIENT_ID", "x")
+    monkeypatch.setenv("MICROSOFT_OAUTH_CLIENT_SECRET", "y")
     import agents.inbox  # noqa: F401  populate registry
     from db import engine
     import fleet_roster as fr

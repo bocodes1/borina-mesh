@@ -7,6 +7,20 @@ from apscheduler.triggers.cron import CronTrigger
 from events import bus, ActivityEvent
 
 
+def _msoauth_connectable() -> bool:
+    """True only when a real Microsoft OAuth connection is possible. A live
+    connection needs BOTH the client id and secret — gating on the id alone
+    let the inbox-triage cron register against a half-configured app. Prefer
+    integrations.microsoft_oauth.configured() (the canonical check); fall back
+    to checking both env vars if that module can't be imported."""
+    try:
+        from integrations.microsoft_oauth import configured
+        return bool(configured())
+    except Exception:  # noqa: BLE001
+        import os
+        return bool(os.getenv("MICROSOFT_OAUTH_CLIENT_ID") and os.getenv("MICROSOFT_OAUTH_CLIENT_SECRET"))
+
+
 def parse_cron(expression: str) -> CronTrigger:
     """Parse a cron expression. Raises ValueError on invalid input."""
     parts = expression.strip().split()
@@ -132,7 +146,7 @@ class SchedulerService:
         for agent_id, cron in schedules.items():
             if not registry.get(agent_id):
                 continue
-            if agent_id == "inbox-triage" and not os.getenv("MICROSOFT_OAUTH_CLIENT_ID"):
+            if agent_id == "inbox-triage" and not _msoauth_connectable():
                 print("[scheduler] inbox-triage cron skipped — Microsoft OAuth not configured")
                 continue
             if agent_id in self._schedules:
