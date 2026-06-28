@@ -87,6 +87,51 @@ def list_artifacts() -> list[ArtifactInfo]:
     return sorted(merged.values(), key=lambda a: (a.date, a.name), reverse=True)
 
 
+def _extract_artifact_body(text: str) -> str:
+    """Return the output body of a markdown artifact.
+
+    The markdown fallback writes a metadata header followed by an
+    ``## Output`` section; return what follows it. If there's no such
+    marker, return the whole text.
+    """
+    marker = "## Output"
+    idx = text.find(marker)
+    if idx != -1:
+        return text[idx + len(marker):].strip()
+    return text.strip()
+
+
+def latest_artifact_for_agent(agent_id: str) -> str:
+    """Body text of the newest markdown artifact for ``agent_id``, or ''.
+
+    Scans every reports root for ``<agent_id>-*.md`` files (the path scheme
+    `save_run_output` writes), picks the newest by (date dir, filename) — both
+    lexically sortable and monotonic — and returns its output body.
+    """
+    safe_agent = agent_id.replace("/", "-")
+    best_key: tuple[str, str] | None = None
+    best_file: Path | None = None
+    for root in _reports_roots():
+        if not root.exists():
+            continue
+        for day_dir in root.iterdir():
+            if not day_dir.is_dir():
+                continue
+            for file in day_dir.glob(f"{safe_agent}-*.md"):
+                if not file.is_file():
+                    continue
+                key = (day_dir.name, file.name)
+                if best_key is None or key > best_key:
+                    best_key = key
+                    best_file = file
+    if best_file is None:
+        return ""
+    try:
+        return _extract_artifact_body(best_file.read_text(encoding="utf-8"))
+    except OSError:
+        return ""
+
+
 def get_artifact_path(date: str, name: str) -> Path:
     """Get a safe path to an artifact. Raises ValueError on traversal attempts.
 

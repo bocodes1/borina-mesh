@@ -1,6 +1,11 @@
 import pytest
 from pathlib import Path
-from artifacts import list_artifacts, get_artifact_path, ArtifactInfo
+from artifacts import (
+    list_artifacts,
+    get_artifact_path,
+    ArtifactInfo,
+    latest_artifact_for_agent,
+)
 
 
 def test_list_artifacts_empty(tmp_path, monkeypatch):
@@ -59,3 +64,27 @@ def test_list_artifacts_surfaces_telegram_meta(tmp_path, monkeypatch):
     assert art.prompt == "verify my stocks"
     # the meta sidecar dir is not itself listed as an artifact
     assert all(a.name != "researcher-1.pdf.json" for a in result)
+
+
+def test_latest_artifact_for_agent_returns_newest_body(tmp_path, monkeypatch):
+    monkeypatch.setenv("REPORTS_DIR", str(tmp_path))
+    old = tmp_path / "2026-06-01"
+    old.mkdir()
+    (old / "researcher-00001-0900.md").write_text(
+        "# researcher — Job #1\n\n## Output\n\nold digest"
+    )
+    new = tmp_path / "2026-06-02"
+    new.mkdir()
+    (new / "researcher-00002-0900.md").write_text(
+        "# researcher — Job #2\n\n## Output\n\nnew digest"
+    )
+    body = latest_artifact_for_agent("researcher")
+    assert "new digest" in body
+    assert "old digest" not in body
+    # only the output body is returned, not the metadata header
+    assert "Job #2" not in body
+
+
+def test_latest_artifact_for_agent_none(tmp_path, monkeypatch):
+    monkeypatch.setenv("REPORTS_DIR", str(tmp_path))
+    assert latest_artifact_for_agent("researcher") == ""
