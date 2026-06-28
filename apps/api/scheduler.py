@@ -550,10 +550,32 @@ class SchedulerService:
         }
         runner_id = SCHEDULER_TO_RUNNER.get(agent_id)
 
+        # ── Job-contract path (grounded task + clean output + skip-if-no-signal) ──
+        from agents import contracts as _contracts
+        from agents.context_pack import build_context_pack
+        task_spec = _contracts.load_task_spec(runner_id) if runner_id else None
+
         output_parts = []
         error_msg = None
         try:
-            if runner_id and runner_id in AGENT_REGISTRY:
+            if runner_id in _contracts.CONTRACTED and task_spec:
+                last = _contracts.last_artifact_text(agent_id)
+                pack = build_context_pack(agent_id, query=agent.name, data="",
+                                          last_artifact=last)
+                if _contracts.should_skip(runner_id, pack.signal_hash):
+                    # No meaningful change — persist a one-line artifact, zero LLM.
+                    output_parts.append("NO CHANGE")
+                else:
+                    from dispatch.answer import run_agent_for_answer
+                    run_prompt = (
+                        f"{task_spec}\n\nCONTEXT:\n{pack.text}\n\n"
+                        "Do the job above using only this context. Output in the format the "
+                        "task specifies. If the context shows nothing new, reply exactly: NO CHANGE."
+                    )
+                    body = await run_agent_for_answer(runner_id, run_prompt, job_id)
+                    output_parts.append(body)
+                    _contracts.write_last_signal(runner_id, pack.signal_hash)
+            elif runner_id and runner_id in AGENT_REGISTRY:
                 # Persistent tmux session path (runner_v2).
                 result = await run_agent_task(runner_id, prompt)
                 if result.ok:

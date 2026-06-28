@@ -128,6 +128,55 @@ async def test_scheduled_run_does_not_call_qa():
 
 
 # ---------------------------------------------------------------------------
+# Task 4 — contracted agents run grounded + clean + skip-if-no-signal
+# ---------------------------------------------------------------------------
+
+def test_contracted_run_short_circuits_with_zero_llm(monkeypatch):
+    import asyncio
+    import agents.researcher  # noqa: F401  populate registry so researcher resolves
+    import agents.contracts as C
+    import agents.context_pack as CP
+    import dispatch.answer as answer
+    from scheduler import SchedulerService
+
+    monkeypatch.setattr(C, "load_task_spec", lambda sid: "Write a digest.")
+    monkeypatch.setattr(C, "last_artifact_text", lambda aid, **k: "prev")
+    monkeypatch.setattr(CP, "build_context_pack",
+                        lambda aid, **k: CP.ContextPack(text="ctx", signal_hash="SAME"))
+    monkeypatch.setattr(C, "should_skip", lambda sid, sig: True)
+    called = {"n": 0}
+    async def _boom(*a, **k):
+        called["n"] += 1
+        return "should not run"
+    monkeypatch.setattr(answer, "run_agent_for_answer", _boom)
+    asyncio.run(SchedulerService()._run_agent("researcher"))
+    assert called["n"] == 0  # no LLM spent on a no-signal run
+
+
+def test_contracted_run_uses_clean_handoff_when_signal_changes(monkeypatch):
+    import asyncio
+    import agents.researcher  # noqa: F401  populate registry so researcher resolves
+    import agents.contracts as C
+    import agents.context_pack as CP
+    import dispatch.answer as answer
+    from scheduler import SchedulerService
+
+    monkeypatch.setattr(C, "load_task_spec", lambda sid: "Write a digest.")
+    monkeypatch.setattr(C, "last_artifact_text", lambda aid, **k: "prev")
+    monkeypatch.setattr(CP, "build_context_pack",
+                        lambda aid, **k: CP.ContextPack(text="ctx", signal_hash="NEW"))
+    monkeypatch.setattr(C, "should_skip", lambda sid, sig: False)
+    seen = {}
+    async def _ans(runner_id, prompt, job_id):
+        seen["runner_id"] = runner_id; seen["prompt"] = prompt
+        return "clean digest body"
+    monkeypatch.setattr(answer, "run_agent_for_answer", _ans)
+    asyncio.run(SchedulerService()._run_agent("researcher"))
+    assert seen["runner_id"] == "researcher"
+    assert "Write a digest." in seen["prompt"] and "CONTEXT:" in seen["prompt"]
+
+
+# ---------------------------------------------------------------------------
 # §A1 — trader LLM cron removed; cheap non-LLM uptime ping replaces it
 # ---------------------------------------------------------------------------
 
