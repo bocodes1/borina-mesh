@@ -10,12 +10,6 @@ interface Stats {
   queued: number;
   today: number;
 }
-interface Summary {
-  total_runs: number;
-  total_tokens: number;
-  total_cost_usd: number;
-  runs_by_agent: Record<string, unknown>;
-}
 
 function useInterval(fn: () => void, ms: number) {
   useEffect(() => {
@@ -42,12 +36,12 @@ function Cell({ label, children }: { label: string; children: React.ReactNode })
   );
 }
 
-export function CommandStatusBar() {
+export function CommandStatusBar({ agents: externalAgents }: { agents?: Agent[] } = {}) {
   const [clock, setClock] = useState("--:--:--");
   const [uptime, setUptime] = useState(0);
   const [stats, setStats] = useState<Stats>({ active: 0, queued: 0, today: 0 });
-  const [agents, setAgents] = useState<Agent[]>([]);
-  const [summary, setSummary] = useState<Summary | null>(null);
+  const [localAgents, setLocalAgents] = useState<Agent[]>([]);
+  const agents = externalAgents ?? localAgents;
   const [jobs, setJobs] = useState<Job[]>([]);
 
   // Ambient: clock + uptime tick every second so the bar is never frozen.
@@ -61,13 +55,12 @@ export function CommandStatusBar() {
   }, []);
 
   useInterval(() => { api.listJobs().then((j) => setJobs(j)).catch(() => {}); }, 12000);
-  useInterval(() => { api.listAgents().then(setAgents).catch(() => {}); }, 8000);
+  // Only self-poll /agents when no shared source was passed (e.g. standalone
+  // usage). On the dashboard the parent's single poll feeds `externalAgents`.
+  useInterval(() => { if (externalAgents) return; api.listAgents().then(setLocalAgents).catch(() => {}); }, 8000);
   useInterval(() => {
     fetch("/api/jobs/stats").then((r) => r.json()).then(setStats).catch(() => {});
   }, 5000);
-  useInterval(() => {
-    fetch("/api/analytics/summary").then((r) => r.json()).then(setSummary).catch(() => {});
-  }, 30000);
 
   const total = agents.length;
   const running = agents.filter((a) => a.status === "running").length || stats.active;
@@ -98,12 +91,6 @@ export function CommandStatusBar() {
       <Cell label="runs·today"><LiveValue value={stats.today} /></Cell>
       <Cell label="success">{successRate == null ? "—" : <><LiveValue value={successRate} countUp={false} />%</>}</Cell>
       <Cell label="avg·lat">{avgLatency == null ? "—" : <><LiveValue value={avgLatency} countUp={false} />s</>}</Cell>
-      <Cell label="tokens">
-        {summary ? <LiveValue value={summary.total_tokens} format={(n) => Math.round(n).toLocaleString()} /> : "—"}
-      </Cell>
-      <Cell label="cost">
-        {summary ? <LiveValue value={summary.total_cost_usd} format={(n) => `$${n.toFixed(2)}`} /> : "—"}
-      </Cell>
     </div>
   );
 }

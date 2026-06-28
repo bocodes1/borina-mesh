@@ -105,12 +105,25 @@ function FleetCard({
 export function AgentFleet({
   byAgent,
   onSelectAgent,
+  agents: externalAgents,
+  loading: externalLoading,
+  error: externalError,
+  reload: externalReload,
 }: {
   byAgent: Record<string, number[]>;
   onSelectAgent: (a: Agent) => void;
+  // When provided (dashboard), the fleet reads the shared /agents poll instead
+  // of opening its own fetch. Omitted → self-fetches (standalone usage/tests).
+  agents?: Agent[];
+  loading?: boolean;
+  error?: string | null;
+  reload?: () => void;
 }) {
-  const { data, loading, error, reload } = useAsync<Agent[]>(() => api.listAgents(), []);
-  const agents = data ?? [];
+  const self = useAsync<Agent[]>(() => (externalAgents ? Promise.resolve(externalAgents) : api.listAgents()), [externalAgents]);
+  const agents = externalAgents ?? self.data ?? [];
+  const loading = externalAgents ? (externalLoading ?? false) : self.loading;
+  const error = externalAgents ? (externalError ?? null) : self.error;
+  const reload = externalReload ?? self.reload;
   const runningCount = agents.filter((a) => a.status === "running").length;
   const counts = { active: 0, parked: 0, retired: 0 };
   for (const a of agents) counts[(a.state ?? "active") as keyof typeof counts]++;
@@ -120,9 +133,9 @@ export function AgentFleet({
     (a, b) => order[(a.state ?? "active") as keyof typeof order] - order[(b.state ?? "active") as keyof typeof order],
   );
 
-  const desc = data
-    ? `${counts.active} active · ${counts.parked} parked · ${counts.retired} retired · ${runningCount} running`
-    : "loading…";
+  const desc = loading
+    ? "loading…"
+    : `${counts.active} active · ${counts.parked} parked · ${counts.retired} retired · ${runningCount} running`;
 
   return (
     <div>

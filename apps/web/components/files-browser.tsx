@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import ReactMarkdown from "react-markdown";
-import { FileText, FileType, Image as ImageIcon, Download, Search, X, ExternalLink, Send } from "lucide-react";
+import { FileText, FileType, Image as ImageIcon, Download, Search, X, ExternalLink, Send, RefreshCw } from "lucide-react";
 import { api, type FilesResponse, type FileItem } from "@/lib/api";
 import { SectionHeader } from "@/components/ui/section-header";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -39,7 +39,10 @@ export function FilesBrowser() {
   );
   useEffect(() => {
     load();
-    const id = setInterval(load, 8000); // new outputs animate in as tasks produce them
+    // The registry rarely changes within a session; a tight 8s poll re-shipped
+    // the whole list needlessly. Refresh on filter change + a slow safety net,
+    // and give the operator a manual refresh button for new outputs.
+    const id = setInterval(load, 120000);
     return () => clearInterval(id);
   }, [load]);
 
@@ -74,6 +77,9 @@ export function FilesBrowser() {
               <option value="all">all types</option>
               {(data?.types ?? []).map((t) => <option key={t} value={t}>{t}</option>)}
             </select>
+            <button onClick={load} aria-label="refresh files" className="rounded border border-border bg-surface p-1.5 text-muted-foreground hover:text-brand">
+              <RefreshCw className="h-3.5 w-3.5" />
+            </button>
           </div>
         }
       />

@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { CalendarDays, ChevronLeft, ChevronRight, Plus, MapPin, Video } from "lucide-react";
 import { api, type CalendarResponse, type CalendarEvent } from "@/lib/api";
+import { eventStart } from "@/lib/calendar";
 import { useAsync } from "@/lib/use-async";
 import { Navbar } from "@/components/navbar";
 import { SectionHeader } from "@/components/ui/section-header";
@@ -95,7 +96,8 @@ function CalendarBody() {
   const eventsByDay = useMemo(() => {
     const map: Record<string, CalendarEvent[]> = {};
     for (const ev of allEvents) {
-      const key = ev.start ? startOfDay(new Date(ev.start)).toDateString() : "";
+      const start = eventStart(ev);
+      const key = start ? startOfDay(start).toDateString() : "";
       (map[key] ||= []).push(ev);
     }
     for (const k of Object.keys(map)) {

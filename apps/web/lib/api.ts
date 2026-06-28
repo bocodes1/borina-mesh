@@ -134,11 +134,13 @@ export const api = {
     }),
 
   // ── Files tab ───────────────────────────────────────────────────────────
-  listFiles: (params?: { source?: string; type?: string; q?: string }) => {
+  listFiles: (params?: { source?: string; type?: string; q?: string; since?: string; limit?: number }) => {
     const qs = new URLSearchParams();
     if (params?.source && params.source !== "all") qs.set("source", params.source);
     if (params?.type && params.type !== "all") qs.set("type", params.type);
     if (params?.q) qs.set("q", params.q);
+    if (params?.since) qs.set("since", params.since);
+    if (params?.limit) qs.set("limit", String(params.limit));
     const s = qs.toString();
     return fetchJSON<FilesResponse>(`/files${s ? `?${s}` : ""}`);
   },

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { RefreshCw, AlertTriangle } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -91,7 +92,7 @@ export function FinanceBrief() {
       ) : (
         <ScrollArea className="max-h-[70vh] pr-4">
           <article className="prose prose-invert prose-sm max-w-none">
-            <ReactMarkdown>{brief.markdown}</ReactMarkdown>
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>{brief.markdown}</ReactMarkdown>
           </article>
         </ScrollArea>
       )}
