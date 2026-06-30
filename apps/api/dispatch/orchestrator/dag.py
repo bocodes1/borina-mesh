@@ -116,10 +116,13 @@ async def drive_run(
             rdy = ready(tasks, edges)
 
             if not rdy:
-                # Nothing runnable: finalize. (No pending/ready/active remain — a
-                # node still `pending` here is blocked behind a failed/blocked
-                # upstream that ready() already excluded.)
-                if any(t.status in ("pending", "active") for t in tasks):
+                # Nothing runnable: finalize. A node in `awaiting_approval` means
+                # the run is parked on a write-node tap (paused, NOT done). A
+                # node still `pending`/`active` here is blocked behind a
+                # failed/blocked upstream that ready() already excluded.
+                if any(t.status == "awaiting_approval" for t in tasks):
+                    run_row.status = "paused"
+                elif any(t.status in ("pending", "active") for t in tasks):
                     run_row.status = "blocked"
                 else:
                     run_row.status = "done"
@@ -133,19 +136,44 @@ async def drive_run(
             for e in edges:
                 upstreams.setdefault(e.dst, []).append(e.src)
 
-            batch = []  # (task_id, key, prompt)
+            chat_id = run_row.chat_id
+            batch = []        # (task_id, key, prompt) — read/synthesize/verify
+            write_cards = []  # (task_id, key, intent, ctx_parts) — peeled writes
             for t in rdy:
                 ctx_parts = []
                 for src in upstreams.get(t.key, []):
                     body = (result_by_key.get(src) or "").strip()
                     if body:
                         ctx_parts.append(f"## Context from {src}\n\n{body[:_RESULT_CAP]}")
+                # Write nodes NEVER run here — they pause for an approval tap.
+                if t.kind == "write":
+                    t.status = "awaiting_approval"
+                    t.started_at = datetime.utcnow()
+                    s.add(t)
+                    write_cards.append((t.id, t.key, t.prompt, ctx_parts))
+                    continue
                 prompt = ("\n\n".join(ctx_parts) + "\n\n" + t.prompt) if ctx_parts else t.prompt
                 t.status = "active"
                 t.started_at = datetime.utcnow()
                 s.add(t)
                 batch.append((t.id, t.key, prompt))
             s.commit()
+
+        # ── emit approval Cards for any peeled write nodes (post-commit) ────────
+        for (tid, key, intent, ctx_parts) in write_cards:
+            if not chat_id:
+                continue
+            from dispatch.cards import Card, Action, send_card
+            lines = [intent[:200]] + [c[:200] for c in ctx_parts[:3]]
+            card = Card(
+                headline=f"Approve write: {key}",
+                lines=lines,
+                actions=[Action("Approve", f"run:approve:{tid}"), Action("Reject", f"run:reject:{tid}")],
+            )
+            try:
+                send_card(chat_id, card)
+            except Exception:  # noqa: BLE001
+                pass
 
         # ── run the batch concurrently (outside the session; may be slow) ──────
         results = await asyncio.gather(
@@ -190,3 +218,75 @@ async def drive_run(
                 pass
 
     return _snapshot(run_id)
+
+
+# ── write-node approval lifecycle (driven from the Telegram callback) ───────────
+# NOTE: the actual side-effecting write (`user_initiated=True`) lives in the
+# `routes/telegram.py` callback handler — the engine never sets that flag. These
+# helpers only flip persisted state and unblock the graph after a real tap.
+
+def complete_write(task_id: int, result: Optional[str] = None) -> Optional[int]:
+    """Mark an approved write node `done` (its write already ran in the callback).
+    Returns the run id so the caller can relaunch the driver to unblock dependents."""
+    with session_scope() as s:
+        t = s.get(RunTask, task_id)
+        if t is None:
+            return None
+        t.status = "done"
+        t.result = (result or "(write approved & executed)")[:_RESULT_CAP]
+        t.completed_at = datetime.utcnow()
+        s.add(t)
+        s.commit()
+        return t.run_id
+
+
+def reject_write(task_id: int) -> Optional[int]:
+    """Mark a rejected write node `skipped` and its transitive dependents
+    `blocked` (they depended on an action that never happened). Returns run id."""
+    with session_scope() as s:
+        t = s.get(RunTask, task_id)
+        if t is None:
+            return None
+        run_id = t.run_id
+        t.status = "skipped"
+        t.completed_at = datetime.utcnow()
+        s.add(t)
+        edges = list(s.exec(select(TaskEdge).where(TaskEdge.run_id == run_id)))
+        blocked = _transitive_dependents(t.key, edges)
+        if blocked:
+            for d in s.exec(select(RunTask).where(RunTask.run_id == run_id)):
+                if d.key in blocked and d.status in ("pending", "ready"):
+                    d.status = "blocked"
+                    s.add(d)
+        s.commit()
+        return run_id
+
+
+async def _drive_default(run_id: int) -> dict:
+    """Relaunch a paused run with the default per-node runner.
+
+    v1 routes resumed read/synthesize nodes through the read-only researcher
+    answer pipeline; Task 9's engine replaces this with the per-node agent
+    runner. A relaunch only fires after an approval/reject tap, so it never
+    re-runs `done` nodes (their `result` is persisted)."""
+    from dispatch.answer import run_agent_for_answer
+
+    with session_scope() as s:
+        r = s.get(Run, run_id)
+        job_id = (r.job_id or 0) if r else 0
+
+    async def runner(prompt: str) -> str:
+        return await run_agent_for_answer("researcher", prompt, job_id)
+
+    return await drive_run(run_id, runner)
+
+
+def launch_run(run_id: int) -> bool:
+    """Schedule `_drive_default` on the running event loop (fire-and-forget),
+    mirroring `goal.launch_goal`. Returns False if there is no loop (tests/sync)."""
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return False
+    loop.create_task(_drive_default(run_id))
+    return True

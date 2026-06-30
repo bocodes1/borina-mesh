@@ -91,3 +91,39 @@ def test_upstream_results_feed_downstream_and_run_done():
     assert run.status == "done"
     assert tasks["a"].status == "done" and tasks["a"].result == "alpha-result"
     assert tasks["b"].status == "done"
+
+
+def test_write_node_peeled_to_awaiting_approval_with_card(monkeypatch):
+    # A ready write node is removed from the batch, flips to awaiting_approval,
+    # and emits one approval Card — its runner is never invoked.
+    from unittest.mock import patch
+
+    with Session(engine) as s:
+        run = Run(text="t", mode="mission", status="running", chat_id=7)
+        s.add(run)
+        s.commit()
+        s.refresh(run)
+        rid = run.id
+        s.add(RunTask(run_id=rid, key="w", agent="planner", kind="write", prompt="create event"))
+        s.commit()
+
+    called = []
+
+    async def runner(prompt):
+        called.append(prompt)
+        return "should-not-run"
+
+    with patch("dispatch.cards.send_card") as mock_card:
+        asyncio.run(dag.drive_run(rid, runner, max_steps=5))
+        assert mock_card.call_count == 1
+        data = [a.data for a in mock_card.call_args.args[1].actions]
+        with Session(engine) as s:
+            tid = s.exec(select(RunTask).where(RunTask.run_id == rid)).first().id
+        assert data == [f"run:approve:{tid}", f"run:reject:{tid}"]
+
+    assert called == []  # write node never runs
+    with Session(engine) as s:
+        run = s.get(Run, rid)
+        t = s.exec(select(RunTask).where(RunTask.run_id == rid)).first()
+    assert t.status == "awaiting_approval"
+    assert run.status == "paused"
