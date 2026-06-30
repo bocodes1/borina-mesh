@@ -489,36 +489,30 @@ def render_screen_for_prompt(screen: ScreenResult) -> str:
 
     The agent's job is to *write up* this data in the BRIEF_FORMAT.md voice.
     Don't include analysis here — just the raw inputs the agent needs.
+
+    Omit-or-stay-silent: only sections with real data are emitted. Empty
+    sections (no macro, no movers, no candidates) are dropped entirely so the
+    agent never sees a "nothing here, say so" hint to apologize about. Crypto is
+    intentionally excluded — it is rendered deterministically in Python, not by
+    the LLM.
     """
     lines: list[str] = []
     lines.append(f"# Screen results — {screen.trading_date}")
     lines.append(f"Generated at: {screen.generated_at}")
     lines.append("")
 
-    lines.append("## Data sources available")
-    for src, ok in screen.data_source_status.items():
-        lines.append(f"- {src}: {'configured' if ok else 'NOT configured (skipped)'}")
-    lines.append("")
-
-    if screen.skipped_sections:
-        lines.append("## Sections skipped today")
-        for s in screen.skipped_sections:
-            lines.append(f"- {s}")
-        lines.append("")
-
-    lines.append("## Macro context")
     if screen.macro:
+        macro_lines = []
         for k, v in screen.macro.items():
             if isinstance(v, dict) and "value" in v:
-                lines.append(f"- {k}: {v['value']} (as of {v['date']})")
-            elif isinstance(v, dict) and "error" in v:
-                lines.append(f"- {k}: unavailable ({v['error']})")
-    else:
-        lines.append("- No macro data available today.")
-    lines.append("")
+                macro_lines.append(f"- {k}: {v['value']} (as of {v['date']})")
+        if macro_lines:
+            lines.append("## Macro context")
+            lines.extend(macro_lines)
+            lines.append("")
 
-    lines.append("## Watchlist movement (>2% yesterday)")
     if screen.watchlist_movement:
+        lines.append("## Watchlist movement (>2% yesterday)")
         for m in screen.watchlist_movement:
             excluded = f" [EXCLUDED: {m.excluded_reason}]" if m.excluded_reason else ""
             er = f" earnings_in_{m.earnings_in_days}d" if m.earnings_in_days is not None else ""
@@ -526,13 +520,10 @@ def render_screen_for_prompt(screen: ScreenResult) -> str:
                 f"- {m.ticker}: {m.change_pct:+.2f}% on {m.volume_ratio}x avg volume "
                 f"(close ${m.close:.2f}, as_of {m.as_of}){er}{excluded}"
             )
-    else:
-        lines.append("- No watchlist movements above threshold today.")
-    lines.append("")
+        lines.append("")
 
-    lines.append(f"## Equity candidates ({len(screen.candidates_equity)})")
-    if not screen.candidates_equity:
-        lines.append("- 0 candidates passed today's screen. Honestly say so in the brief.")
+    if screen.candidates_equity:
+        lines.append(f"## Equity candidates ({len(screen.candidates_equity)})")
     for c in screen.candidates_equity:
         lines.append(f"### {c.ticker} — {c.name}")
         lines.append(f"- Price: ${c.price}  Market cap: ${c.market_cap:,.0f}" if c.price and c.market_cap else f"- Price/mcap missing")
@@ -552,15 +543,6 @@ def render_screen_for_prompt(screen: ScreenResult) -> str:
             lines.append(f"- Institutional ownership snapshot: {c.institutional_changes[0] if c.institutional_changes else 'n/a'}")
         if c.earnings_in_days is not None:
             lines.append(f"- Next earnings in: {c.earnings_in_days} days")
-        lines.append("")
-
-    if screen.candidates_crypto:
-        lines.append(f"## Crypto candidates ({len(screen.candidates_crypto)})")
-        for c in screen.candidates_crypto:
-            lines.append(
-                f"- {c.symbol} ({c.name}): ${c.price:,.0f}  mcap ${c.market_cap/1e9:.0f}B  "
-                f"24h {c.change_24h_pct:+.2f}%"
-            )
         lines.append("")
 
     if screen.pipeline:

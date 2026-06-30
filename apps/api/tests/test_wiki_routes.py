@@ -7,7 +7,6 @@ os.environ["OBSIDIAN_VAULT_PATH"] = "/tmp/borina-test-vault-v2"
 
 import agents.ceo  # noqa
 import agents.scout  # noqa
-import agents.polymarket  # noqa
 import agents.researcher  # noqa
 import agents.trader  # noqa
 import agents.adset  # noqa

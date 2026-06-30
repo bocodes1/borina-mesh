@@ -27,8 +27,9 @@ from models import Task
 DAILY_BRIEF_TASK_PROMPT = """<task name="daily_brief">
 You are Bo's morning chief-of-staff. Produce a single markdown brief for today that is
 genuinely useful for running the day. Be concrete, skimmable, and specific — no filler,
-no generic advice. Use real data via the available tools/agents. If a data source is
-unavailable, say so in one line and move on; never fabricate numbers.
+no generic advice. Use real data via the available tools/agents. Output only sections
+with real data: omit an empty section silently — never print "unavailable", "not
+connected", "not configured", or any apology. Never fabricate numbers.
 
 Write the brief with these sections, in order:
 
@@ -98,7 +99,7 @@ def build_fallback_brief(day: Optional[str] = None) -> str:
     """
     from sqlmodel import select
     from db import session_scope
-    from integrations import market_data, weather, polymarket, google_calendar
+    from integrations import market_data, weather, google_calendar
 
     day = day or date.today().isoformat()
 
@@ -110,27 +111,26 @@ def build_fallback_brief(day: Optional[str] = None) -> str:
     top_tasks = open_tasks[:3]
 
     md_status = market_data.status()
-    pm = polymarket.get_overview()
     cal = google_calendar.status()
     wx = weather.get_current()
 
+    # NOTE (§A3): no apology/"not connected — add KEY" filler. The fallback keeps
+    # all section headers (the /daily tabs + parser expect 9), but bodies for
+    # unconnected sources stay terse and neutral rather than nagging about creds.
     tldr_lines = [
         f"- {len(open_tasks)} open task(s); "
         + (f"top focus: {top_tasks[0].title}" if top_tasks else "none queued"),
-        "- Market data: "
-        + ("connected" if md_status.connected else "not connected — add MARKET_DATA_API_KEY"),
-        "- Calendar: " + ("connected" if cal.connected else "not connected — complete Google OAuth"),
     ]
 
     movers = (
-        "Watchlist movers unavailable — market data not connected."
+        "No watchlist movers."
         if not md_status.connected
         else "No notable movers computed in fallback mode (live agent provides ranked movers)."
     )
 
     trading = (
-        f"Polymarket bot: {'healthy' if (pm.data or {}).get('signal', {}).get('healthy') else 'state unknown'}; "
-        f"read-only. {'' if pm.connected else 'Bot API not reachable.'}"
+        "Trading bot intel is produced by the trader agent on its schedule; "
+        "not run in fallback mode."
     )
 
     if top_tasks:
@@ -144,26 +144,27 @@ def build_fallback_brief(day: Optional[str] = None) -> str:
     nudges = "\n".join(
         [
             "- **Review watchlist** — quick scan of overnight moves · run agent researcher",
-            "- **Check Polymarket** — surface today's edge · open chat polymarket",
         ]
     )
 
     weather_line = (
         f"{wx.data.get('conditions')}, {wx.data.get('temp')}° — plan accordingly."
         if wx.connected and wx.data
-        else "Weather unavailable — set WEATHER_API_KEY + HOME_LAT/HOME_LON."
+        else "No weather data."
     )
 
     bodies = {
         "tldr": "\n".join(tldr_lines),
-        "markets": "Major indices + watchlist quotes require the market-data integration. "
-        + ("Connected." if md_status.connected else "Not connected."),
+        "markets": "Live index + watchlist quotes are produced by the market-data agent."
+        if not md_status.connected
+        else "Market data connected.",
         "watchlist_movers": movers,
         "trading": trading,
-        "calendar": "Today's events require Google Calendar authorization. "
-        + ("Authorized." if cal.connected else "Not authorized."),
+        "calendar": "Today's events are produced by the calendar agent."
+        if not cal.connected
+        else "Calendar connected.",
         "tasks_focus": tasks_focus,
-        "inbox": "Inbox triage summary is produced by the inbox agent on its schedule; not run in fallback mode.",
+        "inbox": "Inbox triage summary is produced by the inbox agent on its schedule.",
         "nudges": nudges,
         "weather_logistics": weather_line,
     }

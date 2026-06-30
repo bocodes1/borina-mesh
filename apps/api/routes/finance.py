@@ -80,7 +80,8 @@ async def get_brief():
 
 @router.post("/brief/regenerate")
 async def regenerate_brief():
-    """Force-regenerate today's brief. Burns Opus quota — call sparingly."""
+    """Force-regenerate today's brief. Runs the cheaper brief-tier model (or no
+    model at all when the screen is empty) — call sparingly all the same."""
     try:
         brief = await generate_brief(use_cache=False)
     except Exception as e:
@@ -91,6 +92,8 @@ async def regenerate_brief():
         "generated_at": brief.generated_at,
         "duration_seconds": brief.duration_seconds,
         "error": brief.error,
+        "data_source_status": brief.screen.get("data_source_status", {}),
+        "skipped_sections": brief.screen.get("skipped_sections", []),
     }
 
 

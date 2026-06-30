@@ -76,21 +76,26 @@ def test_approve_item_dispatches_move(monkeypatch):
 
 # ── operator phases ──────────────────────────────────────────────────────────
 @pytest.mark.asyncio
-async def test_morning_phase_builds_approval_card(monkeypatch):
+async def test_morning_phase_removed_no_longer_regenerates_plan(monkeypatch):
+    """§A3: the operator-morning phase was deleted because it byte-for-byte
+    duplicated the 6:30 planner brief. run_phase('morning') must NOT regenerate
+    the plan (it is no longer a valid phase)."""
     import daily_operator as op
-
-    async def fake_gen(day=None):
-        return {"source": "test", "task_count": 0, "calendar_count": 2}
-    monkeypatch.setattr(op, "_chat_id", lambda: None)  # don't actually send
     import planner
-    monkeypatch.setattr(planner, "generate_plan_with_agent", fake_gen)
-    monkeypatch.setattr(op, "_proposed_calendar_items",
-                        lambda day: [{"id": 1, "title": "move standup", "kind": "calendar", "status": "proposed"},
-                                     {"id": 2, "title": "add focus block", "kind": "calendar", "status": "proposed"}])
-    card = await op.run_phase("morning", day="2026-06-18", send=False)
-    assert "2 calendar change" in card.headline
-    datas = [a.data for a in card.actions]
-    assert "op:approveall:2026-06-18" in datas and "op:skip:2026-06-18" in datas
+
+    called = []
+
+    async def spy_gen(day=None):
+        called.append(day)
+        return {"source": "test", "task_count": 0, "calendar_count": 2}
+
+    monkeypatch.setattr(op, "_chat_id", lambda: None)
+    monkeypatch.setattr(planner, "generate_plan_with_agent", spy_gen)
+
+    assert "morning" not in op.PHASES
+    with pytest.raises(ValueError):
+        await op.run_phase("morning", day="2026-06-18", send=False)
+    assert called == []  # the plan was never regenerated
 
 
 @pytest.mark.asyncio
@@ -164,25 +169,29 @@ async def test_eod_phase_survives_learner_error(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_morning_phase_sends_narrative(monkeypatch):
-    import daily_operator as op
+async def test_morning_brief_now_lives_in_planner_cron(monkeypatch):
+    """§A3: the single morning brief that sends the Telegram digest is the 6:30
+    planner cron (scheduler._run_planner), not the operator. Verify that path
+    still proposes + sends WITHOUT any autonomous calendar write."""
     import planner
-    from dispatch import dispatcher, cards
+    from dispatch import dispatcher
+    from integrations import google_calendar
+    from integrations.base import ok
+
+    writes = []
+    monkeypatch.setattr(google_calendar, "create_event",
+                        lambda event, **k: writes.append(event) or ok("google_calendar", {"id": "x"}))
     sent = []
-    monkeypatch.setattr(op, "_chat_id", lambda: 123)
     monkeypatch.setattr(dispatcher, "send_telegram_message",
                         lambda chat, text, **k: sent.append(text) or 1)
-    monkeypatch.setattr(cards, "send_card", lambda chat, card: None)
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "123")
 
     async def fake_gen(day=None):
-        return {"source": "agent", "task_count": 0, "calendar_count": 1,
-                "brief": "Focus day.", "threads": [{"name": "planner", "today": "ship"}]}
+        return {"source": "agent", "task_count": 1, "calendar_count": 1}
     monkeypatch.setattr(planner, "generate_plan_with_agent", fake_gen)
-    monkeypatch.setattr(planner, "get_plan", lambda day=None: {
-        "calendar": [{"title": "Deep work"}], "tasks": [], "items": []})
-    monkeypatch.setattr(op, "_proposed_calendar_items",
-                        lambda day: [{"id": 1, "title": "Deep work", "kind": "calendar",
-                                      "status": "proposed"}])
+    monkeypatch.setattr(planner, "plan_digest_text", lambda: "Morning plan ready.")
 
-    await op.run_phase("morning", day="2026-06-24", send=True)
-    assert any("Focus day." in t for t in sent)  # narrative was sent
+    from scheduler import SchedulerService
+    await SchedulerService()._run_planner()
+    assert any("Morning plan ready." in t for t in sent)  # digest sent
+    assert writes == []  # propose-only — no autonomous calendar write

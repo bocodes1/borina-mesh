@@ -5,9 +5,9 @@ AGENT_MODELS: dict[str, str] = {
     "ceo":              "claude-opus-4-8",
     "researcher":       "claude-opus-4-8",
     "ecommerce-scout":  "claude-opus-4-8",
-    "polymarket-intel": "claude-opus-4-8",
     "qa_director":      "claude-opus-4-8",
-    "finance":          "claude-opus-4-8",
+    "finance":          "claude-opus-4-8",   # deep-dive only (on-demand)
+    "finance-brief":    "claude-sonnet-4-6", # morning brief write-up — cheaper tier
     "trader":           "claude-sonnet-4-6",
     "adset-optimizer":  "claude-sonnet-4-6",
     "inbox-triage":     "claude-haiku-4-5-20251001",

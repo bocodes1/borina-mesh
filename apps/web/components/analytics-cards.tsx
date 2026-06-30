@@ -1,7 +1,7 @@
 "use client";
 
 import { motion } from "framer-motion";
-import { Activity, Zap, DollarSign, Users } from "lucide-react";
+import { Activity, Users } from "lucide-react";
 import { useAsync } from "@/lib/use-async";
 import { KpiCard } from "@/components/ui/kpi-card";
 import { SectionHeader } from "@/components/ui/section-header";
@@ -29,7 +29,7 @@ async function fetchJSON<T>(path: string): Promise<T> {
   return res.json();
 }
 
-type AgentRow = { agent: string; runs: number; tokens: number; cost_usd: number };
+type AgentRow = { agent: string; runs: number };
 
 export function AnalyticsCards() {
   const { data, loading, error, reload } = useAsync(
@@ -44,7 +44,7 @@ export function AnalyticsCards() {
   if (loading) {
     return (
       <div className="space-y-6">
-        <SkeletonKpiStrip count={4} />
+        <SkeletonKpiStrip count={2} />
         <SkeletonCard />
       </div>
     );
@@ -57,22 +57,18 @@ export function AnalyticsCards() {
 
   const stats = [
     { label: "Total Runs", value: summary.total_runs.toLocaleString(), icon: <Activity className="h-4 w-4" /> },
-    { label: "Tokens Used", value: summary.total_tokens.toLocaleString(), icon: <Zap className="h-4 w-4" /> },
-    { label: "Total Cost", value: `$${summary.total_cost_usd.toFixed(2)}`, icon: <DollarSign className="h-4 w-4" /> },
     { label: "Active Agents", value: Object.keys(summary.runs_by_agent).length.toString(), icon: <Users className="h-4 w-4" /> },
   ];
 
   const maxRuns = Math.max(1, ...timeseries.map((t) => t.runs));
 
   const rows: AgentRow[] = Object.entries(summary.runs_by_agent)
-    .map(([agent, s]) => ({ agent, ...s }))
+    .map(([agent, s]) => ({ agent, runs: s.runs }))
     .sort((a, b) => b.runs - a.runs);
 
   const columns: Column<AgentRow>[] = [
     { key: "agent", header: "Agent", render: (r) => <span className="font-mono">{r.agent}</span> },
     { key: "runs", header: "Runs", numeric: true },
-    { key: "tokens", header: "Tokens", numeric: true, render: (r) => r.tokens.toLocaleString() },
-    { key: "cost_usd", header: "Cost", numeric: true, render: (r) => <span className="text-positive">${r.cost_usd.toFixed(3)}</span> },
   ];
 
   return (
@@ -111,7 +107,7 @@ export function AnalyticsCards() {
       </div>
 
       <div>
-        <SectionHeader title="Usage by agent" description="Runs, tokens, and cost per agent" />
+        <SectionHeader title="Usage by agent" description="Runs per agent" />
         <DataTable columns={columns} rows={rows} getRowKey={(r) => r.agent} emptyTitle="No agent runs yet" />
       </div>
     </div>

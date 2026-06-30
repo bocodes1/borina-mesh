@@ -17,14 +17,13 @@ from fastapi.responses import RedirectResponse
 from dotenv import load_dotenv
 
 from db import init_db
-from routes import agents as agents_routes, chat as chat_routes, jobs as jobs_routes, activity as activity_routes, schedules as schedules_routes, analytics as analytics_routes, artifacts as artifacts_routes, logs as logs_routes, wiki as wiki_routes, briefs as briefs_routes, memory as memory_routes, workspace as workspace_routes, threads as threads_routes, tasks as tasks_routes, stats as stats_routes, finance as finance_routes, finance_lifeos as finance_lifeos_routes, daily as daily_routes, calendar as calendar_routes, telegram as telegram_routes, files as files_routes, outlook as outlook_routes, outreach as outreach_routes
+from routes import agents as agents_routes, chat as chat_routes, jobs as jobs_routes, activity as activity_routes, schedules as schedules_routes, analytics as analytics_routes, artifacts as artifacts_routes, logs as logs_routes, wiki as wiki_routes, briefs as briefs_routes, memory as memory_routes, workspace as workspace_routes, tasks as tasks_routes, stats as stats_routes, finance as finance_routes, finance_lifeos as finance_lifeos_routes, daily as daily_routes, calendar as calendar_routes, telegram as telegram_routes, files as files_routes, outlook as outlook_routes, outreach as outreach_routes
 from routers.sessions import router as sessions_router
 from scheduler import scheduler_service
 
 # Import agent modules to trigger registration
 import agents.ceo  # noqa
 import agents.scout  # noqa
-import agents.polymarket  # noqa
 import agents.researcher  # noqa
 import agents.trader  # noqa
 import agents.adset  # noqa
@@ -78,6 +77,7 @@ async def lifespan(app: FastAPI):
         print(f"[wiki] bootstrap error: {e}")
     scheduler_service.start()
     scheduler_service.register_defaults()
+    scheduler_service.register_trader_health()
     scheduler_service.register_finance_brief()
     scheduler_service.register_schedule_daily()
     scheduler_service.register_planner()
@@ -151,7 +151,6 @@ app.include_router(wiki_routes.router)
 app.include_router(briefs_routes.router)
 app.include_router(memory_routes.router)
 app.include_router(workspace_routes.router)
-app.include_router(threads_routes.router)
 app.include_router(tasks_routes.router)
 app.include_router(finance_routes.router)
 app.include_router(finance_lifeos_routes.router)

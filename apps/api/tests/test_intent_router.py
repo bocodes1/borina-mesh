@@ -19,8 +19,8 @@ def test_worked_example_resolves_to_researcher_finance_deepdive():
 @pytest.mark.parametrize(
     "text,expected_agent",
     [
-        # Active agents route by keyword. (Parked scout/adset and retired
-        # polymarket-intel now fall through to researcher — see test_fleet_roster.)
+        # Active agents route by keyword. (Parked scout/adset now fall
+        # through to researcher — see test_fleet_roster.)
         ("triage my inbox please", "inbox"),
         ("how's the trading bot health", "trader"),
         ("research the new AI chip startups", "researcher"),

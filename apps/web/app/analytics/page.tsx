@@ -15,7 +15,7 @@ export default function AnalyticsPage() {
         className="mb-6"
       >
         <h2 className="text-3xl font-bold tracking-tight">Analytics</h2>
-        <p className="text-muted-foreground mt-1">Token usage, costs, and run history.</p>
+        <p className="text-muted-foreground mt-1">Run history and agent activity.</p>
       </motion.div>
 
       <AnalyticsCards />

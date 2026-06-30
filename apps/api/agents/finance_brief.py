@@ -24,6 +24,7 @@ from agents.finance_screen import (
     render_screen_for_prompt,
     run_screen,
 )
+from dispatch.answer import run_agent_for_answer
 
 
 CACHE_DIR = Path.home() / ".borina" / "data" / "finance-briefs"
@@ -62,24 +63,35 @@ def save_cached_brief(brief: CachedBrief) -> Path:
     return path
 
 
+EMPTY_BRIEF_LINE = "No candidates passed today."
+
+
 def _build_prompt(screen: ScreenResult) -> str:
     """Template the screen results into a prompt for the finance agent.
 
     The agent's CLAUDE.md (auto-loaded from its workdir) already explains who
-    it is and the hard rules. This prompt provides only:
-    1. Today's screen data
-    2. A reminder of which BRIEF_FORMAT to use
-    3. The "honest about gaps" reminder
+    it is and the hard rules. This prompt carries an OMIT-OR-STAY-SILENT
+    contract: only emit sections backed by real data, never print an empty
+    header, never hedge or excuse a missing source. Crypto is excluded — it is
+    rendered deterministically in Python, not by the LLM.
     """
     rendered = render_screen_for_prompt(screen)
-    return f"""Write today's morning brief in the voice and structure of
-~/.borina/agents/finance/BRIEF_FORMAT.md (equities) and BRIEF_FORMAT_CRYPTO.md
-(crypto). Use ONLY the screen results below — do not invent numbers, do not
-fabricate candidates. If a section is empty (0 candidates passed), say so
-honestly per CLAUDE.md rules.
+    return f"""Write today's equity morning brief for {screen.trading_date} in the
+voice and structure of ~/.borina/agents/finance/BRIEF_FORMAT.md. Use ONLY the
+screen results below — do not invent numbers, do not fabricate candidates.
 
-Output the brief as pure markdown. Do not wrap it in code fences. Start with
-the `# Morning Brief — {{date}}` H1 from BRIEF_FORMAT.md.
+OUTPUT CONTRACT (strict):
+- Emit only sections that are backed by real data in the screen below.
+- Never print an empty section header. If a section has no data, omit the whole
+  section silently.
+- Do not hedge, fill, or excuse missing data. Source availability is surfaced
+  separately in the dashboard — say nothing about it here.
+- Do not write up crypto; it is rendered separately as a price line.
+- If 0 candidates passed and there were 0 watchlist moves, output exactly this
+  one line and nothing else: {EMPTY_BRIEF_LINE}
+
+Output pure markdown. Do not wrap it in code fences. Start with the H1:
+  # Morning Brief — {screen.trading_date}
 
 ────────────────── SCREEN RESULTS ──────────────────
 
@@ -91,6 +103,24 @@ Now write the brief.
 """
 
 
+def _crypto_price_line(screen: ScreenResult) -> str:
+    """Deterministic BTC/ETH/SOL price line — no LLM.
+
+    The screen never gathers the on-chain inputs (NVT/MVRV/flows) the crypto
+    rubric demands, so we don't ask the model to write up crypto. We just print
+    the latest prices as a one-line factual footer when available.
+    """
+    parts: list[str] = []
+    for c in screen.candidates_crypto:
+        if c.price is None:
+            continue
+        chg = f" ({c.change_24h_pct:+.1f}% 24h)" if c.change_24h_pct is not None else ""
+        parts.append(f"{c.symbol} ${c.price:,.0f}{chg}")
+    if not parts:
+        return ""
+    return "**Crypto:** " + " · ".join(parts)
+
+
 async def generate_brief(
     *,
     clients: Optional[FinanceClients] = None,
@@ -100,7 +130,8 @@ async def generate_brief(
     """Run the screen, ask the finance agent to write up the brief, cache, return.
 
     If ``use_cache`` is True and today's brief already exists, returns the
-    cached copy without burning Opus quota.
+    cached copy without spending any model quota. An empty screen short-circuits
+    to a deterministic one-line brief with no LLM call at all.
     """
     if use_cache:
         cached = load_cached_brief()
@@ -109,22 +140,39 @@ async def generate_brief(
 
     started = time.time()
     screen = run_screen(clients=clients, universe=universe)
+    crypto_line = _crypto_price_line(screen)
+
+    # Short-circuit: nothing passed the screen → emit a deterministic one-line
+    # brief in Python and skip the LLM entirely. Burning Opus/Sonnet quota to
+    # have a model type "No candidates passed today." is pure waste.
+    if not screen.candidates_equity and not screen.watchlist_movement:
+        body = f"# Morning Brief — {screen.trading_date}\n\n{EMPTY_BRIEF_LINE}"
+        if crypto_line:
+            body += f"\n\n{crypto_line}"
+        brief = CachedBrief(
+            trading_date=screen.trading_date,
+            generated_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            duration_seconds=round(time.time() - started, 2),
+            markdown=body + "\n",
+            screen=screen.to_dict(),
+            error=None,
+        )
+        save_cached_brief(brief)
+        return brief
+
     prompt = _build_prompt(screen)
 
-    # Run the agent.
+    # Run the agent and read its clean handoff file (no tmux pane de-chroming).
+    job_id = int(date.fromisoformat(screen.trading_date).strftime("%Y%m%d"))
     try:
-        from agents.runner_v2 import run_agent_task
-        result = await run_agent_task(
-            "finance",
-            prompt,
-            timeout_seconds=900,  # 15 min — multi-source synthesis can run long
-            idle_seconds=6,
-        )
-        markdown = _clean_brief_output(result.output) if result.ok else ""
-        error = None if result.ok else (result.error or "unknown error")
+        markdown = await run_agent_for_answer("finance", prompt, job_id)
+        error = None if markdown.strip() else "agent returned an empty brief"
     except Exception as e:
         markdown = ""
         error = f"{type(e).__name__}: {e!r}"
+
+    if markdown.strip() and crypto_line:
+        markdown = markdown.rstrip() + f"\n\n{crypto_line}\n"
 
     brief = CachedBrief(
         trading_date=screen.trading_date,

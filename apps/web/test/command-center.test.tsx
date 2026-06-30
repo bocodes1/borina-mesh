@@ -62,4 +62,10 @@ describe("CommandStatusBar — alive at rest", () => {
     expect(screen.getByText("uptime")).toBeInTheDocument();
     await waitFor(() => expect(api.listAgents).toHaveBeenCalled());
   });
+
+  it("does not render fake token or cost cells", () => {
+    render(<CommandStatusBar />);
+    expect(screen.queryByText("tokens")).not.toBeInTheDocument();
+    expect(screen.queryByText("cost")).not.toBeInTheDocument();
+  });
 });

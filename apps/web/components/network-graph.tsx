@@ -31,18 +31,28 @@ export function NetworkGraph() {
   const agentsRef = useRef<Agent[]>([]);
   const svgRef = useRef<SVGSVGElement>(null);
 
-  // Build topology from agents.
+  // Build topology from agents, then poll so node status (running/idle/error)
+  // stays live instead of a stale mount-time snapshot. The force-sim node
+  // positions are only rebuilt when the agent set actually changes — a
+  // status-only refresh preserves layout.
   useEffect(() => {
     let cancelled = false;
-    api.listAgents().then((list) => {
-      if (cancelled) return;
-      setAgents(list);
-      agentsRef.current = list;
-      const ids = [HUB, ...list.map((a) => a.id)];
-      nodesRef.current = initNodes(ids, W, H);
-      edgesRef.current = list.map((a) => ({ source: HUB, target: a.id }));
-    }).catch(() => {});
-    return () => { cancelled = true; };
+    const fetchAgents = () =>
+      api.listAgents().then((list) => {
+        if (cancelled) return;
+        setAgents(list);
+        agentsRef.current = list;
+        const ids = [HUB, ...list.map((a) => a.id)];
+        const existing = new Set(nodesRef.current.map((n) => n.id));
+        const sameSet = existing.size === ids.length && ids.every((id) => existing.has(id));
+        if (!sameSet) {
+          nodesRef.current = initNodes(ids, W, H);
+          edgesRef.current = list.map((a) => ({ source: HUB, target: a.id }));
+        }
+      }).catch(() => {});
+    fetchAgents();
+    const id = setInterval(fetchAgents, 8000);
+    return () => { cancelled = true; clearInterval(id); };
   }, []);
 
   // Live edge pulses on REAL activity.

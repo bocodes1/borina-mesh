@@ -54,11 +54,6 @@ def test_scout_agent_registered():
     assert EcommerceScoutAgent.id == "ecommerce-scout"
 
 
-def test_polymarket_agent_registered():
-    from agents.polymarket import PolymarketIntelAgent
-    assert PolymarketIntelAgent.id == "polymarket-intel"
-
-
 def test_researcher_agent_registered():
     from agents.researcher import ResearcherAgent
     assert ResearcherAgent.id == "researcher"

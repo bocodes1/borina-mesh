@@ -1,6 +1,6 @@
 import {
   Briefcase, Search, Compass, LineChart, Megaphone,
-  Inbox, TrendingUp, ShieldCheck, type LucideIcon,
+  Inbox, ShieldCheck, type LucideIcon,
 } from "lucide-react";
 
 export type AgentVisual = { icon: LucideIcon; accent: string };
@@ -12,7 +12,6 @@ export const AGENT_VISUALS: Record<string, AgentVisual> = {
   trader:      { icon: LineChart,    accent: "#f59e0b" },
   "adset-optimizer": { icon: Megaphone, accent: "#ec4899" },
   "inbox-triage": { icon: Inbox,     accent: "#64748b" },
-  "polymarket-intel": { icon: TrendingUp, accent: "#14b8a6" },
   qa_director: { icon: ShieldCheck,  accent: "#dc2626" },
 };
 

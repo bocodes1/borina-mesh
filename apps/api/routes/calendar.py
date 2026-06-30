@@ -6,6 +6,7 @@ rejects anything not flagged `user_initiated=True`, so an agent path can never
 create events. Task deadlines surface as all-day chips so /daily and /calendar
 stay consistent.
 """
+from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -29,15 +30,36 @@ class EventCreate(BaseModel):
     user_initiated: bool = False
 
 
+def _parse_dt(s: str) -> datetime:
+    """Parse an ISO datetime/date into a naive (UTC) datetime for comparison.
+
+    Tolerates a trailing 'Z', explicit offsets, and date-only strings so the
+    window bounds and task due dates are compared as instants, not as raw
+    lexicographic ISO strings (which mis-sorts across differing precisions/zones).
+    """
+    s = s.strip()
+    if s.endswith("Z"):
+        s = s[:-1] + "+00:00"
+    try:
+        dt = datetime.fromisoformat(s)
+    except ValueError:
+        dt = datetime.fromisoformat(s + "T00:00:00")
+    if dt.tzinfo is not None:
+        dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
+    return dt
+
+
 def _task_chips(session: Session, time_min: str, time_max: str) -> list[dict]:
     """Open tasks with a due date become all-day chips."""
     tasks = session.exec(
         select(Task).where(Task.done == False, Task.due != None)  # noqa: E711,E712
     ).all()
+    tmin = _parse_dt(time_min)
+    tmax = _parse_dt(time_max)
     chips = []
     for t in tasks:
         due_iso = t.due.isoformat() if t.due else None
-        if due_iso and time_min <= due_iso <= time_max:
+        if t.due and tmin <= t.due <= tmax:
             chips.append(
                 {
                     "id": f"task-{t.id}",

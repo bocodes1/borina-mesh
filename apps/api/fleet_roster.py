@@ -24,7 +24,6 @@ SHORT_TO_LONG = {
     "trader": "trader",
     "researcher": "researcher",
     "scout": "ecommerce-scout",
-    "polymarket": "polymarket-intel",
     "adset": "adset-optimizer",
     "inbox": "inbox-triage",
     "finance": "finance",
@@ -45,11 +44,12 @@ ROSTER_SEED: dict[str, str] = {
     "applier": ACTIVE,
     "adset-optimizer": PARKED,
     "ecommerce-scout": PARKED,
-    "polymarket-intel": RETIRED,
     "qa_director": RETIRED,
     "finance": RETIRED,
-    "planner": RETIRED,
-    "polymarket": RETIRED,   # legacy duplicate id
+    # planner is ACTIVE: after the efficiency overhaul (§A3) it is the single
+    # consolidated 6:30 morning brief that sends Bo's Telegram digest. The §A4
+    # roster gate on register_planner relies on this state to keep it scheduling.
+    "planner": ACTIVE,
     "curator": RETIRED,
 }
 
