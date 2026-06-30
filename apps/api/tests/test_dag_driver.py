@@ -127,3 +127,68 @@ def test_write_node_peeled_to_awaiting_approval_with_card(monkeypatch):
         t = s.exec(select(RunTask).where(RunTask.run_id == rid)).first()
     assert t.status == "awaiting_approval"
     assert run.status == "paused"
+
+
+def _mkrun_with_verify():
+    # r (read) -> s (synthesize) -> v (verify)
+    with Session(engine) as s:
+        run = Run(text="t", mode="mission", status="running")
+        s.add(run)
+        s.commit()
+        s.refresh(run)
+        rid = run.id
+        s.add(RunTask(run_id=rid, key="r", agent="researcher", kind="read", prompt="do r"))
+        s.add(RunTask(run_id=rid, key="s", agent="ceo", kind="synthesize", prompt="do s"))
+        s.add(RunTask(run_id=rid, key="v", agent="ceo", kind="verify", prompt="do v"))
+        s.add(TaskEdge(run_id=rid, src="r", dst="s"))
+        s.add(TaskEdge(run_id=rid, src="s", dst="v"))
+        s.commit()
+        return rid
+
+
+def test_verify_fail_triggers_one_retry_then_finalizes():
+    rid = _mkrun_with_verify()
+    calls = {"r": 0, "s": 0, "v": 0}
+
+    async def runner(prompt):
+        if "do v" in prompt:
+            calls["v"] += 1
+            return '{"pass": false, "reasons": ["needs more detail"]}'
+        if "do s" in prompt:
+            calls["s"] += 1
+            return "synthesis text"
+        calls["r"] += 1
+        return "research"
+
+    asyncio.run(dag.drive_run(rid, runner))
+    # fail verdict → synthesize re-run exactly once more, verify re-fed once more.
+    assert calls["s"] == 2
+    assert calls["v"] == 2
+    with Session(engine) as s:
+        run = s.get(Run, rid)
+        tasks = {t.key: t.status for t in s.exec(select(RunTask).where(RunTask.run_id == rid))}
+    assert run.status == "done"  # finalizes regardless of the second verdict
+    assert tasks["s"] == "done" and tasks["v"] == "done"
+
+
+def test_verify_parse_error_degrades_to_pass():
+    rid = _mkrun_with_verify()
+    calls = {"r": 0, "s": 0, "v": 0}
+
+    async def runner(prompt):
+        if "do v" in prompt:
+            calls["v"] += 1
+            return "not json at all"
+        if "do s" in prompt:
+            calls["s"] += 1
+            return "synthesis text"
+        calls["r"] += 1
+        return "research"
+
+    asyncio.run(dag.drive_run(rid, runner))
+    # garbage verdict degrades to pass → no retry.
+    assert calls["s"] == 1
+    assert calls["v"] == 1
+    with Session(engine) as s:
+        run = s.get(Run, rid)
+    assert run.status == "done"

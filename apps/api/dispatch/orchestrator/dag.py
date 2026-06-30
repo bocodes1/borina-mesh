@@ -16,6 +16,8 @@ verify gate (Task 5) extend `drive_run` later.
 from __future__ import annotations
 
 import asyncio
+import json
+import re
 from datetime import datetime
 from typing import Awaitable, Callable, Optional
 
@@ -63,6 +65,28 @@ def _transitive_dependents(start_key: str, edges: list[TaskEdge]) -> set[str]:
     return seen
 
 
+def _parse_verdict(text: str) -> Optional[dict]:
+    """Tolerant verify-verdict parse (mirrors mission._parse_subtasks): pull the
+    first ``{...}`` object and expect ``{"pass": bool, "reasons": [...]}``. Returns
+    None on any failure → the caller degrades that to a pass (never block a
+    finished run on a flaky critic)."""
+    if not text:
+        return None
+    m = re.search(r"\{.*\}", text, re.DOTALL)
+    if not m:
+        return None
+    try:
+        raw = json.loads(m.group(0))
+    except Exception:
+        try:
+            raw = json.loads(re.sub(r"\n\s*", " ", m.group(0)))
+        except Exception:
+            return None
+    if not isinstance(raw, dict) or "pass" not in raw:
+        return None
+    return raw
+
+
 def _snapshot(run_id: int) -> dict:
     with session_scope() as s:
         run = s.get(Run, run_id)
@@ -95,6 +119,7 @@ async def drive_run(
     The per-node runner is injected so this is unit-testable without agents."""
     from dispatch.answer import clean_agent_output
 
+    retried_verify: set[str] = set()  # verify keys already given their one bounded retry
     steps = 0
     while steps < max_steps:
         steps += 1
@@ -208,6 +233,40 @@ async def drive_run(
                         if t.key in blocked and t.status in ("pending", "ready"):
                             t.status = "blocked"
                             s.add(t)
+
+            # ── verify gate: parse each just-completed verify node's verdict ──
+            # pass / parse-failure → finalize as-is. fail → ONE bounded retry:
+            # reset the single synthesize node (+ this verify) to `pending`,
+            # append the critic's reasons to the synthesize prompt, then let the
+            # ready-set loop re-run synthesize → verify once. A second fail
+            # finalizes regardless (the retry key is already spent).
+            for (tid, key, _), res in zip(batch, results):
+                if isinstance(res, Exception):
+                    continue
+                t = s.get(RunTask, tid)
+                if t is None or t.kind != "verify":
+                    continue
+                verdict = _parse_verdict(t.result or "")
+                if verdict is None or bool(verdict.get("pass", True)):
+                    continue  # pass (or unparseable → degrade to pass) → finalize
+                if key in retried_verify:
+                    continue  # already retried once → finalize regardless
+                retried_verify.add(key)
+                reasons = verdict.get("reasons") or []
+                reason_txt = "\n".join(f"- {r}" for r in reasons if str(r).strip())
+                for synth in s.exec(select(RunTask).where(RunTask.run_id == run_id)):
+                    if synth.kind != "synthesize":
+                        continue
+                    synth.status = "pending"
+                    synth.result = None
+                    synth.completed_at = None
+                    if reason_txt:
+                        synth.prompt = synth.prompt + "\n\n## Revise per verify feedback:\n" + reason_txt
+                    s.add(synth)
+                t.status = "pending"
+                t.result = None
+                t.completed_at = None
+                s.add(t)
             s.commit()
 
         if on_checkin:
