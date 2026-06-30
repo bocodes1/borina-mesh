@@ -78,6 +78,49 @@ def test_approve_executes_write_user_initiated():
         assert s.get(RunTask, tid).status == "done"
 
 
+def test_double_tap_approve_writes_exactly_once():
+    # Telegram inline buttons persist after a tap; a second Approve tap must NOT
+    # re-execute the calendar write (the node is no longer awaiting_approval).
+    from routes.telegram import _handle_run_callback
+
+    rid = _run_with_write()
+    with patch("dispatch.cards.send_card"):
+        asyncio.run(dag.drive_run(rid, _empty, max_steps=5))
+    with Session(engine) as s:
+        tid = list(s.exec(select(RunTask).where(RunTask.run_id == rid)))[0].id
+
+    with patch("integrations.google_calendar.create_event") as mock_write, \
+            patch("dispatch.dispatcher.send_telegram_message"):
+        mock_write.return_value = None
+        _handle_run_callback(f"run:approve:{tid}", 1)
+        _handle_run_callback(f"run:approve:{tid}", 1)  # double-tap
+
+    assert mock_write.call_count == 1  # exactly once despite two taps
+    with Session(engine) as s:
+        assert s.get(RunTask, tid).status == "done"
+
+
+def test_approve_against_read_node_never_writes():
+    # run:approve:{id} aimed at a non-write node must not execute a calendar write.
+    from routes.telegram import _handle_run_callback
+
+    with Session(engine) as s:
+        run = Run(text="t", mode="mission", status="running", chat_id=1)
+        s.add(run)
+        s.commit()
+        s.refresh(run)
+        rid = run.id
+        s.add(RunTask(run_id=rid, key="r", agent="researcher", kind="read",
+                      prompt="do r", status="awaiting_approval"))
+        s.commit()
+        tid = s.exec(select(RunTask).where(RunTask.run_id == rid)).first().id
+
+    with patch("integrations.google_calendar.create_event") as mock_write, \
+            patch("dispatch.dispatcher.send_telegram_message"):
+        _handle_run_callback(f"run:approve:{tid}", 1)
+        assert mock_write.call_count == 0
+
+
 def test_reject_skips_and_blocks_dependents():
     from routes.telegram import _handle_run_callback
 

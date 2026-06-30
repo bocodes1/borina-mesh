@@ -328,6 +328,13 @@ def _handle_run_callback(data: str, chat_id: int) -> dict:
             t = s.get(RunTask, task_id)
             if t is None:
                 return {"ok": True, "status": "run_missing"}
+            # Replay/state guard: the inline button persists after a tap, so a
+            # double-tap (or run:approve against a non-write/read node) must NOT
+            # re-execute the calendar write. Only a write node still parked in
+            # awaiting_approval is a live, un-decided approval. Mirrors the
+            # planner's already_decided guard (_handle_plan_callback).
+            if t.kind != "write" or t.status != "awaiting_approval":
+                return {"ok": True, "status": "run_approve", "task_id": task_id, "toast": "Already done"}
             intent = t.prompt or ""
         # The user-initiated write — the engine never reaches this flag.
         from integrations import google_calendar
