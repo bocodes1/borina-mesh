@@ -1,4 +1,4 @@
-import type { Agent, Job, Artifact, AgentRun } from "./types";
+import type { Agent, Job, Artifact, AgentRun, Run, RunDetail } from "./types";
 
 const API_BASE = "/api"; // proxied to backend via next.config.js
 
@@ -147,6 +147,10 @@ export const api = {
 
   // ── Outreach tab (read-only) ─────────────────────────────────────────────
   getOutreachSummary: () => fetchJSON<OutreachSummary>("/outreach/summary"),
+
+  // ── Orchestration runs (DAG observability) ───────────────────────────────
+  listRuns: () => fetchJSON<Run[]>("/runs"),
+  getRun: (id: number) => fetchJSON<RunDetail>(`/runs/${id}`),
 };
 
 export interface OutreachRow {
