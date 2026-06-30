@@ -88,6 +88,40 @@ def _parse_verdict(text: str) -> Optional[dict]:
     return raw
 
 
+def _safe_call(cb, arg) -> None:
+    """Invoke a surfacing callback, swallowing its errors (surfacing never breaks
+    the run — mirrors the goal runner's guarded on_checkin, `goal.py:202-205`)."""
+    try:
+        cb(arg)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _at_presynthesis(run_id: int) -> bool:
+    """The goal-mode phase boundary: every read/write node has reached a terminal
+    state and a `synthesize` node is still `pending` (the work is done, the report
+    is about to be written). Returns False when there is no synthesize phase (e.g.
+    a migrated linear goal) — finalize is the only boundary then."""
+    with session_scope() as s:
+        tasks = s.exec(select(RunTask).where(RunTask.run_id == run_id)).all()
+    rw = [t for t in tasks if t.kind in ("read", "write")]
+    synth = [t for t in tasks if t.kind == "synthesize"]
+    if not rw or not synth:
+        return False
+    rw_terminal = all(t.status in ("done", "skipped", "failed", "blocked") for t in rw)
+    synth_pending = any(t.status == "pending" for t in synth)
+    return rw_terminal and synth_pending
+
+
+def _final_report(tasks: list[RunTask]) -> str:
+    """The mission-mode final report: the synthesize node's result, else a join of
+    the done leaves' results (degrade path, like `mission.py:119-120`)."""
+    synth = [t for t in tasks if t.kind == "synthesize" and t.result]
+    if synth:
+        return synth[-1].result or ""
+    return "\n\n".join(t.result for t in tasks if t.status == "done" and t.result)
+
+
 def _snapshot(run_id: int) -> dict:
     with session_scope() as s:
         run = s.get(Run, run_id)
@@ -150,6 +184,7 @@ async def drive_run(
     run: Callable[[str], Awaitable[str]],
     *,
     on_checkin: Optional[Callable[[dict], None]] = None,
+    progress: Optional[Callable[[str], None]] = None,
     max_steps: int = 200,
 ) -> dict:
     """Drive the run's DAG to completion. Each tick: poll cancel, compute the
@@ -157,10 +192,20 @@ async def drive_run(
     node, mark a failed node's transitive dependents `blocked`, recompute. Loops
     until no node is `pending`/`ready`/`active`, then sets `Run.status="done"`.
 
-    The per-node runner is injected so this is unit-testable without agents."""
+    Mode-specific surfacing (Task 7): **goal** mode emits `on_checkin(snapshot)`
+    ONLY at phase boundaries — pre-synthesis (the read/write phase is done, the
+    report is next) and finalize — not once per node. **mission** mode runs silent
+    via `progress(msg)`: a single dispatch ping ("N node(s) dispatched") then the
+    final synthesized report. The per-node runner is injected so this is
+    unit-testable without agents."""
     from dispatch.answer import clean_agent_output
 
     retried_verify: set[str] = set()  # verify keys already given their one bounded retry
+    ping_sent = False                 # mission: dispatch ping fired once
+    presynth_sent = False             # goal: pre-synthesis check-in fired once
+    finalize_checkin = False          # goal: fire an on_checkin after the loop
+    final_report: Optional[str] = None  # mission: the report to surface after the loop
+    mode: Optional[str] = None
     steps = 0
     while steps < max_steps:
         steps += 1
@@ -170,6 +215,7 @@ async def drive_run(
             run_row = s.get(Run, run_id)
             if not run_row:
                 return {"status": "missing"}
+            mode = run_row.mode
             if run_row.cancel_requested:
                 run_row.status = "aborted"
                 run_row.updated_at = datetime.utcnow()
@@ -194,6 +240,14 @@ async def drive_run(
                     run_row.status = "done"
                 run_row.updated_at = datetime.utcnow()
                 s.add(run_row)
+                # ── finalize surfacing (Task 7): goal → a final check-in; mission
+                #    → the final synthesized report. Captured here, fired post-loop
+                #    so callbacks run outside the DB session.
+                if run_row.status == "done":
+                    if mode == "goal":
+                        finalize_checkin = True
+                    elif mode == "mission":
+                        final_report = _final_report(tasks)
                 s.commit()
                 break
 
@@ -240,6 +294,12 @@ async def drive_run(
                 send_card(chat_id, card)
             except Exception:  # noqa: BLE001
                 pass
+
+        # ── mission dispatch ping (Task 7): one silent "N node(s) dispatched" ──
+        dispatched = len(batch) + len(write_cards)
+        if mode == "mission" and progress and not ping_sent and dispatched:
+            ping_sent = True
+            _safe_call(progress, f"Mission: {dispatched} node(s) dispatched")
 
         # ── run the batch concurrently (outside the session; may be slow) ──────
         results = await asyncio.gather(
@@ -310,12 +370,17 @@ async def drive_run(
                 s.add(t)
             s.commit()
 
-        if on_checkin:
-            snap = _snapshot(run_id)
-            try:
-                on_checkin(snap)
-            except Exception:  # noqa: BLE001
-                pass
+        # ── goal pre-synthesis check-in (Task 7): the read/write phase is done
+        #    and the report is next — surface once, NOT once per node.
+        if mode == "goal" and on_checkin and not presynth_sent and _at_presynthesis(run_id):
+            presynth_sent = True
+            _safe_call(on_checkin, _snapshot(run_id))
+
+    # ── finalize surfacing fired outside the loop / DB session ──────────────────
+    if finalize_checkin and on_checkin:
+        _safe_call(on_checkin, _snapshot(run_id))
+    if final_report is not None and progress:
+        _safe_call(progress, final_report)
 
     return _snapshot(run_id)
 

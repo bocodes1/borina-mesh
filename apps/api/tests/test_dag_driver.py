@@ -239,6 +239,66 @@ def test_guidance_appends_to_next_ready_node_and_resumes():
     assert run.cancel_requested is False
 
 
+# ── Task 7: mode-specific surfacing ─────────────────────────────────────────────
+def _mkrun_mode(mode, nodes, edges):
+    with Session(engine) as s:
+        run = Run(text="t", mode=mode, status="running", chat_id=9)
+        s.add(run)
+        s.commit()
+        s.refresh(run)
+        for key, kind in nodes:
+            agent = "ceo" if kind in ("synthesize", "verify") else "researcher"
+            s.add(RunTask(run_id=run.id, key=key, agent=agent, kind=kind, prompt=f"do {key}"))
+        for a, b in edges:
+            s.add(TaskEdge(run_id=run.id, src=a, dst=b))
+        s.commit()
+        return run.id
+
+
+def test_goal_mode_checkin_at_phase_boundary_not_per_node():
+    # r1 -> r2 -> s(synthesize). goal mode emits on_checkin ONLY at phase
+    # boundaries: pre-synthesis (after the last read node, s still pending) and
+    # finalize — NOT once per read node, and never via the mission progress ping.
+    rid = _mkrun_mode("goal", [("r1", "read"), ("r2", "read"), ("s", "synthesize")],
+                      [("r1", "r2"), ("r2", "s")])
+    checkins = []
+    pings = []
+
+    async def runner(prompt):
+        return "out"
+
+    asyncio.run(dag.drive_run(rid, runner,
+                              on_checkin=lambda snap: checkins.append({n["key"]: n["status"] for n in snap["nodes"]}),
+                              progress=lambda m: pings.append(m)))
+    assert pings == []                       # goal mode never pings progress
+    assert len(checkins) == 2                # pre-synthesis + finalize only (not 3)
+    assert checkins[0]["s"] == "pending"     # first check-in is pre-synthesis
+    assert checkins[1]["s"] == "done"        # second is at finalize
+
+
+def test_mission_mode_one_progress_ping_and_final_report_no_checkin():
+    # a,b (parallel reads) -> s(synthesize). mission mode runs silent: one
+    # dispatch ping, then the final synthesized report — and NO per-node check-in.
+    rid = _mkrun_mode("mission", [("a", "read"), ("b", "read"), ("s", "synthesize")],
+                      [("a", "s"), ("b", "s")])
+    pings = []
+    checkins = []
+
+    async def runner(prompt):
+        if "do s" in prompt:
+            return "FINAL REPORT"
+        return "leaf"
+
+    asyncio.run(dag.drive_run(rid, runner,
+                              on_checkin=lambda snap: checkins.append(snap),
+                              progress=lambda m: pings.append(m)))
+    assert checkins == []                     # mission never per-node checks in
+    assert len(pings) == 2                    # one dispatch ping + one final report
+    assert "dispatched" in pings[0]
+    assert "2" in pings[0]                    # the parallel fan-out count
+    assert pings[1] == "FINAL REPORT"         # the final synthesized report
+
+
 def test_resume_does_not_rerun_done_nodes():
     # Mirrors a restart mid-run: "a" already done, "b" pending. Re-driving must
     # never re-run "a" and must feed a's persisted result downstream to "b".
