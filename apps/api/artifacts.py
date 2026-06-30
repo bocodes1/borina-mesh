@@ -87,6 +87,51 @@ def list_artifacts() -> list[ArtifactInfo]:
     return sorted(merged.values(), key=lambda a: (a.date, a.name), reverse=True)
 
 
+def _extract_artifact_body(text: str) -> str:
+    """Return the output body of a markdown artifact.
+
+    The markdown fallback writes a metadata header followed by an
+    ``## Output`` section; return what follows it. If there's no such
+    marker, return the whole text.
+    """
+    marker = "## Output"
+    idx = text.find(marker)
+    if idx != -1:
+        return text[idx + len(marker):].strip()
+    return text.strip()
+
+
+def latest_artifact_for_agent(agent_id: str) -> str:
+    """Body text of the newest markdown artifact for ``agent_id``, or ''.
+
+    Scans every reports root for ``<agent_id>-*.md`` files (the path scheme
+    `save_run_output` writes), picks the newest by (date dir, filename) — both
+    lexically sortable and monotonic — and returns its output body.
+    """
+    safe_agent = agent_id.replace("/", "-")
+    best_key: tuple[str, str] | None = None
+    best_file: Path | None = None
+    for root in _reports_roots():
+        if not root.exists():
+            continue
+        for day_dir in root.iterdir():
+            if not day_dir.is_dir():
+                continue
+            for file in day_dir.glob(f"{safe_agent}-*.md"):
+                if not file.is_file():
+                    continue
+                key = (day_dir.name, file.name)
+                if best_key is None or key > best_key:
+                    best_key = key
+                    best_file = file
+    if best_file is None:
+        return ""
+    try:
+        return _extract_artifact_body(best_file.read_text(encoding="utf-8"))
+    except OSError:
+        return ""
+
+
 def get_artifact_path(date: str, name: str) -> Path:
     """Get a safe path to an artifact. Raises ValueError on traversal attempts.
 
@@ -135,7 +180,22 @@ def save_run_output(agent_id: str, job_id: int, prompt: str, output: str, status
     safe_agent = agent_id.replace("/", "-")
     base_name = f"{safe_agent}-{job_id:05d}-{now.strftime('%H%M')}"
 
-    # Try PDF generation first
+    # ALWAYS persist the clean markdown body alongside the PDF. The
+    # last-artifact reader (latest_artifact_for_agent) globs `<agent>-*.md`,
+    # so without this the PDF-only production path leaves nothing for it to
+    # find and context-pack grounding / signal reads silently no-op.
+    md_path = day_dir / f"{base_name}.md"
+    _write_markdown_fallback(
+        md_path=md_path,
+        agent_id=agent_id,
+        job_id=job_id,
+        prompt=prompt,
+        output=output,
+        status=status,
+        timestamp=now,
+    )
+
+    # Try PDF generation — the primary artifact when libs are available.
     pdf_path = day_dir / f"{base_name}.pdf"
     success = _try_generate_pdf(
         pdf_path=pdf_path,
@@ -147,18 +207,8 @@ def save_run_output(agent_id: str, job_id: int, prompt: str, output: str, status
         timestamp=now,
     )
 
-    # Fall back to markdown if PDF generation failed
-    if not success:
-        pdf_path = day_dir / f"{base_name}.md"
-        _write_markdown_fallback(
-            md_path=pdf_path,
-            agent_id=agent_id,
-            job_id=job_id,
-            prompt=prompt,
-            output=output,
-            status=status,
-            timestamp=now,
-        )
+    # The primary/returned artifact is the PDF when produced, else the markdown.
+    primary = pdf_path if success else md_path
 
     # Copy to Obsidian vault if configured
     vault = os.getenv("OBSIDIAN_VAULT_PATH", "").strip()
@@ -167,7 +217,7 @@ def save_run_output(agent_id: str, job_id: int, prompt: str, output: str, status
             vault_dir = (Path(vault).expanduser() / "reports" / date.today().isoformat()).resolve()
             vault_dir.mkdir(parents=True, exist_ok=True)
             import shutil
-            shutil.copy2(pdf_path, vault_dir / pdf_path.name)
+            shutil.copy2(primary, vault_dir / primary.name)
         except Exception as e:
             print(f"[artifacts] Failed to copy to vault: {e}")
 
@@ -175,7 +225,7 @@ def save_run_output(agent_id: str, job_id: int, prompt: str, output: str, status
     # Only explicit user actions should write to the vault. See:
     # docs/superpowers/plans/2026-04-09-wiki-v2.md (pending user review).
 
-    return pdf_path
+    return primary
 
 
 def _write_markdown_fallback(md_path: Path, agent_id: str, job_id: int, prompt: str,

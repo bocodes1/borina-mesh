@@ -37,9 +37,14 @@ AGENT_REGISTRY: dict[str, dict] = {
     "inbox":      {"long_id": "inbox-triage"},
     "scout":      {"long_id": "ecommerce-scout"},
     "ceo":        {"long_id": "ceo"},
-    "researcher": {"long_id": "researcher"},
+    "researcher": {"long_id": "researcher",
+                   "workdir": str(Path.home() / ".borina" / "agents" / "researcher")},
     "adset":      {"long_id": "adset-optimizer"},
-    "planner":    {"long_id": "planner"},
+    "planner":    {"long_id": "planner",
+                   "workdir": str(Path.home() / ".borina" / "agents" / "planner")},
+    # operator-eod runs the planner runner under a distinct workdir:
+    "operator":   {"long_id": "planner",
+                   "workdir": str(Path.home() / ".borina" / "agents" / "operator")},
     "applier":    {"long_id": "applier"},
     # Finance gets a fixed workdir (not pane-prefixed) so its CLAUDE.md +
     # BRIEF_FORMAT.md specs travel with the agent rather than per pane.

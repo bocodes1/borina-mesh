@@ -40,6 +40,32 @@ def _spy_create_event(monkeypatch):
     return calls
 
 
+def test_planner_agent_prompt_includes_context_block(monkeypatch, tmp_path):
+    """The live planner draft prompt is grounded in the same context pack
+    (vault recall + last artifact) as the other bespoke morning agents."""
+    import asyncio
+    import agents.context_pack as CP
+    from agents import runner_v2
+
+    monkeypatch.setenv("REPORTS_DIR", str(tmp_path))
+    monkeypatch.setattr(CP, "build_context_pack",
+                        lambda aid, **k: CP.ContextPack(text="VAULT+PLAN", signal_hash="x"))
+    captured = {}
+
+    async def _fake_run(agent_id, prompt, **k):
+        captured["prompt"] = prompt
+
+        class R:
+            output = ""
+
+        return R()
+
+    monkeypatch.setattr(runner_v2, "run_agent_task", _fake_run)
+    asyncio.run(planner.generate_plan_with_agent(day="2026-06-18"))
+    assert "VAULT+PLAN" in captured["prompt"]
+    assert "CONTEXT:" in captured["prompt"]
+
+
 def test_generate_plan_writes_no_calendar(monkeypatch):
     calls = _spy_create_event(monkeypatch)
     summary = planner.generate_plan()

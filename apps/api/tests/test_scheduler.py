@@ -128,12 +128,63 @@ async def test_scheduled_run_does_not_call_qa():
 
 
 # ---------------------------------------------------------------------------
+# Task 4 — contracted agents run grounded + clean + skip-if-no-signal
+# ---------------------------------------------------------------------------
+
+def test_contracted_run_short_circuits_with_zero_llm(monkeypatch):
+    import asyncio
+    import agents.researcher  # noqa: F401  populate registry so researcher resolves
+    import agents.contracts as C
+    import agents.context_pack as CP
+    import dispatch.answer as answer
+    from scheduler import SchedulerService
+
+    monkeypatch.setattr(C, "load_task_spec", lambda sid: "Write a digest.")
+    monkeypatch.setattr(C, "last_artifact_text", lambda aid, **k: "prev")
+    monkeypatch.setattr(CP, "build_context_pack",
+                        lambda aid, **k: CP.ContextPack(text="ctx", signal_hash="SAME"))
+    monkeypatch.setattr(C, "should_skip", lambda sid, sig: True)
+    called = {"n": 0}
+    async def _boom(*a, **k):
+        called["n"] += 1
+        return "should not run"
+    monkeypatch.setattr(answer, "run_agent_for_answer", _boom)
+    asyncio.run(SchedulerService()._run_agent("researcher"))
+    assert called["n"] == 0  # no LLM spent on a no-signal run
+
+
+def test_contracted_run_uses_clean_handoff_when_signal_changes(monkeypatch):
+    import asyncio
+    import agents.researcher  # noqa: F401  populate registry so researcher resolves
+    import agents.contracts as C
+    import agents.context_pack as CP
+    import dispatch.answer as answer
+    from scheduler import SchedulerService
+
+    monkeypatch.setattr(C, "load_task_spec", lambda sid: "Write a digest.")
+    monkeypatch.setattr(C, "last_artifact_text", lambda aid, **k: "prev")
+    monkeypatch.setattr(CP, "build_context_pack",
+                        lambda aid, **k: CP.ContextPack(text="ctx", signal_hash="NEW"))
+    monkeypatch.setattr(C, "should_skip", lambda sid, sig: False)
+    seen = {}
+    async def _ans(runner_id, prompt, job_id):
+        seen["runner_id"] = runner_id; seen["prompt"] = prompt
+        return "clean digest body"
+    monkeypatch.setattr(answer, "run_agent_for_answer", _ans)
+    asyncio.run(SchedulerService()._run_agent("researcher"))
+    assert seen["runner_id"] == "researcher"
+    assert "Write a digest." in seen["prompt"] and "CONTEXT:" in seen["prompt"]
+
+
+# ---------------------------------------------------------------------------
 # §A1 — trader LLM cron removed; cheap non-LLM uptime ping replaces it
 # ---------------------------------------------------------------------------
 
-def test_register_defaults_drops_trader_ceo_researcher_crons():
+def test_register_defaults_drops_trader_ceo_researcher_crons(monkeypatch):
     """§A1/§A3: no recurring LLM cron for trader, ceo, or researcher; the 2h
-    inbox-triage digest survives."""
+    inbox-triage digest survives (when Microsoft OAuth is configured)."""
+    monkeypatch.setenv("MICROSOFT_OAUTH_CLIENT_ID", "x")
+    monkeypatch.setenv("MICROSOFT_OAUTH_CLIENT_SECRET", "y")
     import agents.inbox, agents.trader, agents.ceo, agents.researcher  # noqa: F401  populate registry
     from db import engine
     import fleet_roster as fr
@@ -146,6 +197,34 @@ def test_register_defaults_drops_trader_ceo_researcher_crons():
     assert "ceo" not in sched
     assert "researcher" not in sched
     assert "inbox-triage" in sched
+
+
+def test_inbox_triage_cron_skipped_without_msoauth(monkeypatch):
+    # A real Microsoft connection needs BOTH client id and secret. Client id
+    # alone is not enough, so the cron must stay skipped.
+    monkeypatch.setenv("MICROSOFT_OAUTH_CLIENT_ID", "x")
+    monkeypatch.delenv("MICROSOFT_OAUTH_CLIENT_SECRET", raising=False)
+    import agents.inbox  # noqa: F401  populate registry
+    from db import engine
+    import fleet_roster as fr
+    fr.seed_roster(engine)
+    from scheduler import SchedulerService
+    svc = SchedulerService()
+    svc.register_defaults()
+    assert "inbox-triage" not in svc._schedules
+
+
+def test_inbox_triage_cron_registered_with_msoauth(monkeypatch):
+    monkeypatch.setenv("MICROSOFT_OAUTH_CLIENT_ID", "x")
+    monkeypatch.setenv("MICROSOFT_OAUTH_CLIENT_SECRET", "y")
+    import agents.inbox  # noqa: F401  populate registry
+    from db import engine
+    import fleet_roster as fr
+    fr.seed_roster(engine)
+    from scheduler import SchedulerService
+    svc = SchedulerService()
+    svc.register_defaults()
+    assert "inbox-triage" in svc._schedules
 
 
 @pytest.mark.asyncio

@@ -241,7 +241,12 @@ def _parse_agent_plan(text: str) -> Optional[dict]:
 
 async def _run_agent_plan(day: str) -> Optional[dict]:
     try:
+        from agents.context_pack import build_context_pack
+        from agents.contracts import last_artifact_text
         prompt = PLANNER_PLAN_PROMPT.format(**_agent_context(day))
+        pack = build_context_pack("planner", query="daily plan calendar tasks",
+                                  data="", last_artifact=last_artifact_text("planner"))
+        prompt = f"{prompt}\n\nCONTEXT:\n{pack.text}"
         output = await _call_agent(prompt)
     except Exception as exc:  # noqa: BLE001
         print(f"[planner] agent path failed, using heuristics: {exc}")

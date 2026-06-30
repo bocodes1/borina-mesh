@@ -224,7 +224,13 @@ async def _run_agent_brief(day: str) -> Optional[str]:
     """Live path: dispatch a researcher-class agent with the task prompt.
     Returns validated markdown, else None (caller falls back)."""
     try:
-        output = await _call_agent(DAILY_BRIEF_TASK_PROMPT.replace("{today}", day))
+        from agents.context_pack import build_context_pack
+        from agents.contracts import last_artifact_text
+        prompt = DAILY_BRIEF_TASK_PROMPT.replace("{today}", day)
+        pack = build_context_pack("researcher", query="morning research brief",
+                                  data="", last_artifact=last_artifact_text("researcher"))
+        prompt = f"{prompt}\n\nCONTEXT:\n{pack.text}"
+        output = await _call_agent(prompt)
     except Exception as exc:  # noqa: BLE001
         print(f"[schedule_daily] agent path failed, using fallback: {exc}")
         return None

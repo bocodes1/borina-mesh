@@ -152,6 +152,37 @@ async def test_eod_phase_updates_profile(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_eod_prompt_includes_context_block(monkeypatch, tmp_path):
+    """The nightly operator learner prompt is grounded in the same context pack
+    (vault recall + last artifact) — additive only, no write/propose changes."""
+    import daily_operator as op
+    import planner
+    import agents.context_pack as CP
+    from agents import runner_v2
+
+    monkeypatch.setenv("REPORTS_DIR", str(tmp_path))
+    monkeypatch.setattr(op, "_chat_id", lambda: None)
+    monkeypatch.setattr(planner, "get_plan", lambda day=None: {"items": []})
+    monkeypatch.setattr(CP, "build_context_pack",
+                        lambda aid, **k: CP.ContextPack(text="OP-CONTEXT", signal_hash="x"))
+    captured = {}
+
+    async def _fake_run(agent_id, prompt, **k):
+        captured["prompt"] = prompt
+
+        class R:
+            output = ""
+
+        return R()
+
+    monkeypatch.setattr(runner_v2, "run_agent_task", _fake_run)
+    card = await op.run_phase("eod", day="2026-06-24", send=False)
+    assert "EOD recap" in card.headline
+    assert "OP-CONTEXT" in captured["prompt"]
+    assert "CONTEXT:" in captured["prompt"]
+
+
+@pytest.mark.asyncio
 async def test_eod_phase_survives_learner_error(monkeypatch):
     import daily_operator as op
     import planner

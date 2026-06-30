@@ -7,6 +7,20 @@ from apscheduler.triggers.cron import CronTrigger
 from events import bus, ActivityEvent
 
 
+def _msoauth_connectable() -> bool:
+    """True only when a real Microsoft OAuth connection is possible. A live
+    connection needs BOTH the client id and secret — gating on the id alone
+    let the inbox-triage cron register against a half-configured app. Prefer
+    integrations.microsoft_oauth.configured() (the canonical check); fall back
+    to checking both env vars if that module can't be imported."""
+    try:
+        from integrations.microsoft_oauth import configured
+        return bool(configured())
+    except Exception:  # noqa: BLE001
+        import os
+        return bool(os.getenv("MICROSOFT_OAUTH_CLIENT_ID") and os.getenv("MICROSOFT_OAUTH_CLIENT_SECRET"))
+
+
 def parse_cron(expression: str) -> CronTrigger:
     """Parse a cron expression. Raises ValueError on invalid input."""
     parts = expression.strip().split()
@@ -128,8 +142,12 @@ class SchedulerService:
             schedules = active_scheduled_agents(DEFAULT_SCHEDULES)
         except Exception:  # noqa: BLE001
             schedules = DEFAULT_SCHEDULES
+        import os
         for agent_id, cron in schedules.items():
             if not registry.get(agent_id):
+                continue
+            if agent_id == "inbox-triage" and not _msoauth_connectable():
+                print("[scheduler] inbox-triage cron skipped — Microsoft OAuth not configured")
                 continue
             if agent_id in self._schedules:
                 continue
@@ -550,10 +568,32 @@ class SchedulerService:
         }
         runner_id = SCHEDULER_TO_RUNNER.get(agent_id)
 
+        # ── Job-contract path (grounded task + clean output + skip-if-no-signal) ──
+        from agents import contracts as _contracts
+        from agents.context_pack import build_context_pack
+        task_spec = _contracts.load_task_spec(runner_id) if runner_id else None
+
         output_parts = []
         error_msg = None
         try:
-            if runner_id and runner_id in AGENT_REGISTRY:
+            if runner_id in _contracts.CONTRACTED and task_spec:
+                last = _contracts.last_artifact_text(agent_id)
+                pack = build_context_pack(agent_id, query=agent.name, data="",
+                                          last_artifact=last)
+                if _contracts.should_skip(runner_id, pack.signal_hash):
+                    # No meaningful change — persist a one-line artifact, zero LLM.
+                    output_parts.append("NO CHANGE")
+                else:
+                    from dispatch.answer import run_agent_for_answer
+                    run_prompt = (
+                        f"{task_spec}\n\nCONTEXT:\n{pack.text}\n\n"
+                        "Do the job above using only this context. Output in the format the "
+                        "task specifies. If the context shows nothing new, reply exactly: NO CHANGE."
+                    )
+                    body = await run_agent_for_answer(runner_id, run_prompt, job_id)
+                    output_parts.append(body)
+                    _contracts.write_last_signal(runner_id, pack.signal_hash)
+            elif runner_id and runner_id in AGENT_REGISTRY:
                 # Persistent tmux session path (runner_v2).
                 result = await run_agent_task(runner_id, prompt)
                 if result.ok:
