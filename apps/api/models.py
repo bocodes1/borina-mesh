@@ -123,6 +123,50 @@ class Milestone(SQLModel, table=True):
     completed_at: Optional[datetime] = None
 
 
+# --- Orchestration engine (DAG) — generalizes Goal/Milestone -----------------
+# NOTE: the design spec names the node table `Task`, but models.py already has a
+# `Task` (the personal daily-task table above). To avoid colliding with that
+# live model the orchestrator node is `RunTask` (table "runtask"); all fields
+# are otherwise exactly per spec §Data model. Auto-created by init_db's
+# create_all — no ALTER (same no-migration pattern as OutreachReply).
+
+
+class Run(SQLModel, table=True):
+    """A unit of orchestrated work — a DAG of RunTasks. Generalizes the old Goal."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    job_id: Optional[int] = Field(default=None, foreign_key="job.id", index=True)
+    text: str                                               # raw "mission:"/"goal:" prompt
+    mode: str = Field(default="mission", index=True)        # mission | goal
+    status: str = Field(default="planning", index=True)     # planning|running|checkin|paused|done|aborted|failed
+    cancel_requested: bool = Field(default=False)           # polled flag — NOT a kill
+    chat_id: Optional[int] = None
+    created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class RunTask(SQLModel, table=True):
+    """One node of a Run's DAG. Generalizes the old Milestone. (Spec name: Task.)"""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    run_id: int = Field(foreign_key="run.id", index=True)
+    key: str = Field(index=True)                            # stable node key from the decompose ("research")
+    agent: str                                              # short agent id (researcher, trader, planner, ceo…)
+    kind: str = Field(default="read", index=True)           # read | write | verify | synthesize
+    prompt: str
+    status: str = Field(default="pending", index=True)
+    # pending | ready | active | done | skipped | blocked | awaiting_approval | failed
+    result: Optional[str] = None                            # cleaned summary, fed downstream + to Cards
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+
+
+class TaskEdge(SQLModel, table=True):
+    """A dependency edge: dst depends on src (src must be done before dst is ready)."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    run_id: int = Field(foreign_key="run.id", index=True)
+    src: str = Field(index=True)                            # RunTask.key of the upstream node
+    dst: str = Field(index=True)                            # RunTask.key of the downstream node
+
+
 class TelegramThread(SQLModel, table=True):
     """Maps a bot-sent Telegram message to the job/agent that produced it, so
     a user reply to that message continues the topic with the same agent."""
