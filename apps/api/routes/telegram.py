@@ -722,20 +722,22 @@ def process_update(update: dict) -> dict:
         )
         return {"ok": True, "status": "build_started", "job_id": job_id}
 
-    # 2b1b. Goal: long-horizon runner — decompose → milestones → check-ins.
+    # 2b1b. Goal: long-horizon runner — now a goal-mode DAG Run on the engine
+    # (decompose → ready-set drive → check-ins at phase boundaries).
     gm = _GOAL_RE.match(text)
     if gm:
-        from dispatch import goal as goal_mod
-        goal_id = goal_mod.create_goal(gm.group("goal").strip(), chat_id)
+        from dispatch.orchestrator import engine as orch
+        goal_text = gm.group("goal").strip()
+        run_id, _job_id = orch.create_run(goal_text, "goal", chat_id)
         sent_id = dispatcher.send_telegram_message(
             chat_id,
-            format_telegram(f"{heard}Goal {goal_id} started — I'll check in after each milestone. "
+            format_telegram(f"{heard}Goal run {run_id} started — I'll check in at phase boundaries. "
                             f"Reply to a check-in to steer, or tap Abort."),
         )
-        # Anchor the goal thread by goal id so replies steer it.
-        dispatcher._record_thread(chat_id, sent_id, "goal", goal_id, gm.group("goal").strip())
-        goal_mod.launch_goal(goal_id)
-        return {"ok": True, "status": "goal_started", "goal_id": goal_id}
+        # Anchor the run thread by run id so replies steer it.
+        dispatcher._record_thread(chat_id, sent_id, "run", run_id, goal_text)
+        orch.launch_orchestration(run_id, "goal", chat_id, goal_text)
+        return {"ok": True, "status": "goal_started", "run_id": run_id}
 
     # 2b1c. Apply: internship pipeline (propose-only) — covers BOTH cold-email
     # targets and job-board postings. Stage each kind and post one approval card
@@ -808,6 +810,10 @@ def process_update(update: dict) -> dict:
             from dispatch import goal as goal_mod
 
             return goal_mod.handle_goal_reply(thread, text, chat_id)
+        if thread and thread.agent_id == "run":
+            from dispatch.orchestrator import engine as orch
+
+            return orch.handle_run_reply(thread, text, chat_id)
         if thread:
             from dispatch.intent import detect_forbidden
 

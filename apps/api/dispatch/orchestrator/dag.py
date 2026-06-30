@@ -16,6 +16,7 @@ verify gate (Task 5) extend `drive_run` later.
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import re
 from datetime import datetime
@@ -200,6 +201,15 @@ async def drive_run(
     unit-testable without agents."""
     from dispatch.answer import clean_agent_output
 
+    # Per-node agent routing: a runner that declares a second parameter is called
+    # `run(prompt, agent)` so each node executes its OWN agent (the engine's
+    # default runner). A legacy prompt-only runner (Tasks 2-7 stubs) is called
+    # `run(prompt)` unchanged — fully backward compatible.
+    try:
+        _wants_agent = len(inspect.signature(run).parameters) >= 2
+    except (TypeError, ValueError):
+        _wants_agent = False
+
     retried_verify: set[str] = set()  # verify keys already given their one bounded retry
     ping_sent = False                 # mission: dispatch ping fired once
     presynth_sent = False             # goal: pre-synthesis check-in fired once
@@ -276,7 +286,7 @@ async def drive_run(
                 t.status = "active"
                 t.started_at = datetime.utcnow()
                 s.add(t)
-                batch.append((t.id, t.key, prompt))
+                batch.append((t.id, t.key, t.agent, prompt))
             s.commit()
 
         # ── emit approval Cards for any peeled write nodes (post-commit) ────────
@@ -303,14 +313,18 @@ async def drive_run(
 
         # ── run the batch concurrently (outside the session; may be slow) ──────
         results = await asyncio.gather(
-            *(run(prompt) for (_, _, prompt) in batch), return_exceptions=True
+            *(
+                run(prompt, agent) if _wants_agent else run(prompt)
+                for (_, _, agent, prompt) in batch
+            ),
+            return_exceptions=True,
         )
 
         # ── persist per node; mark failed nodes' dependents blocked ────────────
         with session_scope() as s:
             edges = list(s.exec(select(TaskEdge).where(TaskEdge.run_id == run_id)))
             failed_keys = []
-            for (tid, key, _), res in zip(batch, results):
+            for (tid, key, _, _), res in zip(batch, results):
                 t = s.get(RunTask, tid)
                 if t is None:
                     continue
@@ -341,7 +355,7 @@ async def drive_run(
             # append the critic's reasons to the synthesize prompt, then let the
             # ready-set loop re-run synthesize → verify once. A second fail
             # finalizes regardless (the retry key is already spent).
-            for (tid, key, _), res in zip(batch, results):
+            for (tid, key, _, _), res in zip(batch, results):
                 if isinstance(res, Exception):
                     continue
                 t = s.get(RunTask, tid)
@@ -428,22 +442,37 @@ def reject_write(task_id: int) -> Optional[int]:
 
 
 async def _drive_default(run_id: int) -> dict:
-    """Relaunch a paused run with the default per-node runner.
-
-    v1 routes resumed read/synthesize nodes through the read-only researcher
-    answer pipeline; Task 9's engine replaces this with the per-node agent
-    runner. A relaunch only fires after an approval/reject tap, so it never
-    re-runs `done` nodes (their `result` is persisted)."""
+    """Relaunch a paused run with the default per-node runner — each node runs its
+    OWN agent through the read-only clean-answer pipeline (Task 9). A relaunch
+    only fires after an approval/reject tap, so it never re-runs `done` nodes
+    (their `result` is persisted)."""
     from dispatch.answer import run_agent_for_answer
 
     with session_scope() as s:
         r = s.get(Run, run_id)
         job_id = (r.job_id or 0) if r else 0
+        chat_id = r.chat_id if r else None
+        mode = r.mode if r else "mission"
 
-    async def runner(prompt: str) -> str:
-        return await run_agent_for_answer("researcher", prompt, job_id)
+    async def runner(prompt: str, agent: str) -> str:
+        return await run_agent_for_answer(agent, prompt, job_id)
 
-    return await drive_run(run_id, runner)
+    on_checkin = None
+    progress = None
+    if chat_id:
+        from dispatch import dispatcher
+        from dispatch.telegram_format import format_telegram
+
+        if mode == "goal":
+            from dispatch.orchestrator.engine import _checkin_text
+
+            def on_checkin(snap: dict) -> None:  # noqa: ANN001
+                dispatcher.send_telegram_message(chat_id, format_telegram(_checkin_text(snap)))
+        else:
+            def progress(msg: str) -> None:  # noqa: ANN001
+                dispatcher.send_telegram_message(chat_id, format_telegram(msg))
+
+    return await drive_run(run_id, runner, on_checkin=on_checkin, progress=progress)
 
 
 def launch_run(run_id: int) -> bool:

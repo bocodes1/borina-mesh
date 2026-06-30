@@ -99,23 +99,38 @@ def test_run_mission_synthesis_failure_joins_sections(monkeypatch):
 
 
 def test_dispatcher_routes_mission_task_type(monkeypatch, tmp_path):
+    """The mission task-type now routes through the orchestration engine: the
+    dispatcher creates/drives a Run rather than calling run_mission directly."""
     from dispatch import dispatcher
     from dispatch.intent import Intent
+    from dispatch.orchestrator import engine as E
 
-    async def fake_mission(text, progress=None):
-        if progress:
-            progress("Mission: 2 agents dispatched")
-        return "# Mission report\n\nDone."
+    async def fake_node(agent, prompt, job_id):
+        if agent == "ceo" and E.DECOMPOSE_MARKER in prompt:
+            return ('{"nodes":['
+                    '{"key":"r","agent":"researcher","kind":"read","prompt":"x","depends_on":[]},'
+                    '{"key":"synth","agent":"ceo","kind":"synthesize","prompt":"x","depends_on":["r"]},'
+                    '{"key":"verify","agent":"ceo","kind":"verify","prompt":"verify","depends_on":["synth"]}'
+                    "]}")
+        if agent == "ceo" and "verify" in prompt.lower():
+            return '{"pass": true}'
+        if agent == "ceo":
+            return "# Mission report\n\nDone."
+        return "findings"
 
-    monkeypatch.setattr("dispatch.mission.run_mission", fake_mission)
-    monkeypatch.setattr(dispatcher, "render_markdown_pdf", lambda md, p: p)
+    monkeypatch.setattr(E, "_run_node", fake_node)
     sent = []
     monkeypatch.setattr(dispatcher, "send_telegram_message",
-                        lambda cid, txt: sent.append(txt) or 1)
-    monkeypatch.setattr(dispatcher, "send_telegram_document", lambda *a, **k: None)
+                        lambda cid, txt, **k: sent.append(txt) or 1)
 
     intent = Intent(raw_text="mission: read the room", agent="ceo",
                     task_type="mission", confidence=0.95, source="alias")
     res = asyncio.run(dispatcher.dispatch_intent(intent, chat_id=6452258223))
-    assert any("Mission" in s for s in sent)  # progress ping forwarded
-    assert "Done." in res["summary"]
+    assert res["mode"] == "mission" and res.get("run_id")
+    assert any("Done." in s for s in sent)  # the synthesized report reached chat
+    from sqlmodel import Session, select
+    from db import engine as db_engine
+    from models import Run
+    with Session(db_engine) as s:
+        run = s.get(Run, res["run_id"])
+        assert run is not None and run.status == "done"
