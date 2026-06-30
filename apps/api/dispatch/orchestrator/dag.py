@@ -27,6 +27,7 @@ from db import session_scope
 from models import Run, RunTask, TaskEdge
 
 _RESULT_CAP = 4000  # chars of each upstream result fed downstream (mirrors mission._RESULT_CAP)
+GUIDANCE_HEADER = "## Guidance from Bo"  # mirrors dispatch.goal.GUIDANCE_HEADER
 
 
 def ready(tasks: list[RunTask], edges: list[TaskEdge]) -> list[RunTask]:
@@ -102,6 +103,46 @@ def _snapshot(run_id: int) -> dict:
                 for t in tasks
             ],
         }
+
+
+# ── cooperative steering (polled flag + GUIDANCE inbox, drained at boundaries) ──
+# Mirrors dispatch/goal.py's request_cancel/add_guidance (`goal.py:102-130`,
+# `:153-158`). Both are COOPERATIVE: they only flip persisted state. The driver
+# acts on its next tick — never a blocking kill.
+
+def request_cancel(run_id: int) -> None:
+    """Set the polled `cancel_requested` flag. The driver aborts at its next tick
+    boundary (the in-flight batch finishes first) — NOT a SIGKILL."""
+    with session_scope() as s:
+        r = s.get(Run, run_id)
+        if r:
+            r.cancel_requested = True
+            r.updated_at = datetime.utcnow()
+            s.add(r)
+            s.commit()
+
+
+def add_guidance(run_id: int, text: str) -> None:
+    """Append steering guidance to the next not-yet-`active` ready node's prompt
+    and resume the run (mirrors `goal.add_guidance`). The DAG analogue of the
+    goal cursor's "next pending milestone" is the next node in the ready set; if
+    nothing is ready yet, fall back to any `pending` node."""
+    with session_scope() as s:
+        r = s.get(Run, run_id)
+        if not r:
+            return
+        tasks = list(s.exec(select(RunTask).where(RunTask.run_id == run_id)))
+        edges = list(s.exec(select(TaskEdge).where(TaskEdge.run_id == run_id)))
+        rdy = ready(tasks, edges)
+        target = rdy[0] if rdy else next((t for t in tasks if t.status == "pending"), None)
+        if target is not None:
+            target.prompt = f"{target.prompt}\n[{GUIDANCE_HEADER}: {text}]"
+            s.add(target)
+        r.status = "running"
+        r.cancel_requested = False
+        r.updated_at = datetime.utcnow()
+        s.add(r)
+        s.commit()
 
 
 async def drive_run(

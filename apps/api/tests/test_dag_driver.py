@@ -192,3 +192,74 @@ def test_verify_parse_error_degrades_to_pass():
     with Session(engine) as s:
         run = s.get(Run, rid)
     assert run.status == "done"
+
+
+# ── Task 6: cooperative steering + resume ───────────────────────────────────────
+def test_cancel_mid_run_stops_at_next_boundary_no_kill():
+    # cancel_requested flipped while a node is in flight → the in-flight node
+    # finishes, the run aborts at the NEXT tick boundary, downstream never starts.
+    rid = _mkrun([("a", "read"), ("b", "read")], [("a", "b")])
+    ran = []
+
+    async def runner(prompt):
+        ran.append(prompt)
+        if "do a" in prompt:
+            dag.request_cancel(rid)  # cooperative flag — NOT a kill
+        return "ok"
+
+    asyncio.run(dag.drive_run(rid, runner))
+    with Session(engine) as s:
+        run = s.get(Run, rid)
+        tasks = {t.key: t.status for t in s.exec(select(RunTask).where(RunTask.run_id == rid))}
+    assert run.status == "aborted"
+    assert any("do a" in p for p in ran)        # a ran (in-flight finished)
+    assert not any("do b" in p for p in ran)    # b never started — stopped at boundary
+    assert tasks["a"] == "done"
+    assert tasks["b"] == "pending"               # left for resume, not killed
+
+
+def test_guidance_appends_to_next_ready_node_and_resumes():
+    rid = _mkrun([("a", "read"), ("b", "read")], [("a", "b")])
+    with Session(engine) as s:
+        r = s.get(Run, rid)
+        r.status = "checkin"
+        r.cancel_requested = True
+        s.add(r)
+        s.commit()
+
+    dag.add_guidance(rid, "focus on X")
+
+    with Session(engine) as s:
+        run = s.get(Run, rid)
+        tasks = {t.key: t for t in s.exec(select(RunTask).where(RunTask.run_id == rid))}
+    # appended to the next not-yet-active ready node (root "a"); run resumes.
+    assert "focus on X" in tasks["a"].prompt
+    assert "focus on X" not in tasks["b"].prompt
+    assert run.status == "running"
+    assert run.cancel_requested is False
+
+
+def test_resume_does_not_rerun_done_nodes():
+    # Mirrors a restart mid-run: "a" already done, "b" pending. Re-driving must
+    # never re-run "a" and must feed a's persisted result downstream to "b".
+    rid = _mkrun([("a", "read"), ("b", "synthesize")], [("a", "b")])
+    with Session(engine) as s:
+        t = s.exec(select(RunTask).where(RunTask.run_id == rid, RunTask.key == "a")).first()
+        t.status = "done"
+        t.result = "already-a"
+        s.add(t)
+        s.commit()
+
+    ran = []
+
+    async def runner(prompt):
+        ran.append(prompt)
+        return "b-out"
+
+    asyncio.run(dag.drive_run(rid, runner))
+    assert not any("do a" in p for p in ran)     # done node never rerun
+    assert any("do b" in p for p in ran)
+    assert any("already-a" in p for p in ran)    # persisted upstream result fed down
+    with Session(engine) as s:
+        run = s.get(Run, rid)
+    assert run.status == "done"

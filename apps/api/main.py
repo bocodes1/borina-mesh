@@ -58,12 +58,12 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         print(f"[jobs] orphan recovery error: {e}")
     try:
-        from dispatch.goal import recover_goals
-        ng = recover_goals()
+        from dispatch.goal import recover_runs
+        ng = recover_runs()
         if ng:
-            print(f"[goal] {ng} goal(s) paused for resume after restart")
+            print(f"[run] {ng} run(s)/goal(s) recovered after restart")
     except Exception as e:
-        print(f"[goal] recovery error: {e}")
+        print(f"[run] recovery error: {e}")
     try:
         from wiki_engine.paths import bootstrap_schema_file, bootstrap_subcategory_files, ensure_vault_layout
         ensure_vault_layout()
