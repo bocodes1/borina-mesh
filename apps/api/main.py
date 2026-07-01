@@ -17,7 +17,7 @@ from fastapi.responses import RedirectResponse
 from dotenv import load_dotenv
 
 from db import init_db
-from routes import agents as agents_routes, chat as chat_routes, jobs as jobs_routes, activity as activity_routes, schedules as schedules_routes, analytics as analytics_routes, artifacts as artifacts_routes, logs as logs_routes, wiki as wiki_routes, briefs as briefs_routes, memory as memory_routes, workspace as workspace_routes, tasks as tasks_routes, stats as stats_routes, finance as finance_routes, finance_lifeos as finance_lifeos_routes, daily as daily_routes, calendar as calendar_routes, telegram as telegram_routes, files as files_routes, outlook as outlook_routes, outreach as outreach_routes
+from routes import agents as agents_routes, chat as chat_routes, jobs as jobs_routes, activity as activity_routes, schedules as schedules_routes, analytics as analytics_routes, artifacts as artifacts_routes, logs as logs_routes, wiki as wiki_routes, briefs as briefs_routes, memory as memory_routes, workspace as workspace_routes, tasks as tasks_routes, stats as stats_routes, finance as finance_routes, finance_lifeos as finance_lifeos_routes, daily as daily_routes, calendar as calendar_routes, telegram as telegram_routes, files as files_routes, outlook as outlook_routes, outreach as outreach_routes, runs as runs_routes
 from routers.sessions import router as sessions_router
 from scheduler import scheduler_service
 
@@ -58,12 +58,12 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         print(f"[jobs] orphan recovery error: {e}")
     try:
-        from dispatch.goal import recover_goals
-        ng = recover_goals()
+        from dispatch.goal import recover_runs
+        ng = recover_runs()
         if ng:
-            print(f"[goal] {ng} goal(s) paused for resume after restart")
+            print(f"[run] {ng} run(s)/goal(s) recovered after restart")
     except Exception as e:
-        print(f"[goal] recovery error: {e}")
+        print(f"[run] recovery error: {e}")
     try:
         from wiki_engine.paths import bootstrap_schema_file, bootstrap_subcategory_files, ensure_vault_layout
         ensure_vault_layout()
@@ -160,6 +160,7 @@ app.include_router(telegram_routes.router)
 app.include_router(files_routes.router)
 app.include_router(outlook_routes.router)
 app.include_router(outreach_routes.router)
+app.include_router(runs_routes.router)
 app.include_router(sessions_router, prefix="/api/sessions", tags=["sessions"])
 
 

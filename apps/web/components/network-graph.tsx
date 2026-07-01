@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, useCallback } from "react";
 import { api } from "@/lib/api";
-import type { Agent } from "@/lib/types";
+import type { Agent, Run, RunDetail } from "@/lib/types";
 import { subscribeToActivity } from "@/lib/activity";
 import { initNodes, stepSimulation, type SimNode, type SimEdge } from "@/lib/force-sim";
 
@@ -16,7 +16,10 @@ interface Particle {
   t: number; // 0..1
 }
 
+type View = "fleet" | "run";
+
 export function NetworkGraph() {
+  const [view, setView] = useState<View>("fleet");
   const [agents, setAgents] = useState<Agent[]>([]);
   const [, setTick] = useState(0);
   const [selected, setSelected] = useState<string | null>(null);
@@ -123,6 +126,27 @@ export function NetworkGraph() {
 
   return (
     <div className="surface-card relative overflow-hidden rounded-lg">
+      <div className="absolute left-1/2 top-3 z-10 flex -translate-x-1/2 gap-0.5 rounded-md border border-foreground/10 bg-surface-2/90 p-0.5 font-mono text-[10px] backdrop-blur">
+        <button
+          type="button"
+          onClick={() => setView("fleet")}
+          aria-pressed={view === "fleet"}
+          className={`rounded px-2 py-0.5 ${view === "fleet" ? "bg-brand/20 text-brand" : "text-muted-foreground hover:text-foreground"}`}
+        >
+          Fleet
+        </button>
+        <button
+          type="button"
+          onClick={() => setView("run")}
+          aria-pressed={view === "run"}
+          className={`rounded px-2 py-0.5 ${view === "run" ? "bg-brand/20 text-brand" : "text-muted-foreground hover:text-foreground"}`}
+        >
+          Run
+        </button>
+      </div>
+
+      {view === "run" ? <RunView /> : (
+      <>
       <svg ref={svgRef} viewBox={`0 0 ${W} ${H}`} className="grid-bg block h-[60vh] w-full" role="img" aria-label="agent network">
         {edgesRef.current.map((e) => {
           const a = nodePos(e.source);
@@ -198,7 +222,171 @@ export function NetworkGraph() {
       </div>
 
       {selected ? <NodePanel agentId={selected} onClose={() => setSelected(null)} /> : null}
+      </>
+      )}
     </div>
+  );
+}
+
+// Status → node color for the run view (mirrors the fleet status palette).
+function runNodeColor(status: string): string {
+  switch (status) {
+    case "done":
+      return "hsl(var(--positive, var(--brand-2)))";
+    case "active":
+    case "ready":
+      return "hsl(var(--brand))";
+    case "failed":
+      return "hsl(var(--negative))";
+    case "awaiting_approval":
+      return "hsl(var(--warning, var(--brand-2)))";
+    case "blocked":
+    case "skipped":
+      return "hsl(var(--muted-foreground) / 0.5)";
+    default: // pending
+      return "hsl(var(--muted-foreground))";
+  }
+}
+
+// The orchestration "run" view: render a single Run's DAG — Task nodes colored
+// by status, TaskEdges as real agent→agent edges. An edge pulses when its dst
+// node's agent shows activity (reuses subscribeToActivity, keyed on node key).
+function RunView() {
+  const [runs, setRuns] = useState<Run[]>([]);
+  const [runId, setRunId] = useState<number | null>(null);
+  const [detail, setDetail] = useState<RunDetail | null>(null);
+  const [, setTick] = useState(0);
+
+  const nodesRef = useRef<SimNode[]>([]);
+  const edgesRef = useRef<SimEdge[]>([]);
+  const activeRef = useRef<Record<string, number>>({}); // node key -> expiry ms
+  const detailRef = useRef<RunDetail | null>(null);
+  const svgRef = useRef<SVGSVGElement>(null);
+
+  // Load the recent-runs list and default to the newest.
+  useEffect(() => {
+    let cancelled = false;
+    api.listRuns().then((list) => {
+      if (cancelled) return;
+      setRuns(list);
+      setRunId((cur) => cur ?? list[0]?.id ?? null);
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
+
+  // Load the selected run's DAG; rebuild the sim layout from its node keys.
+  useEffect(() => {
+    if (runId == null) return;
+    let cancelled = false;
+    api.getRun(runId).then((d) => {
+      if (cancelled) return;
+      setDetail(d);
+      detailRef.current = d;
+      nodesRef.current = initNodes(d.nodes.map((n) => n.key), W, H);
+      edgesRef.current = d.edges.map((e) => ({ source: e.src, target: e.dst }));
+      setTick((n) => (n + 1) % 1000000);
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [runId]);
+
+  // Live pulse: an activity event for agent X lights every node whose agent==X.
+  useEffect(() => {
+    const unsub = subscribeToActivity((e) => {
+      const d = detailRef.current;
+      if (!d || !e.agent_id) return;
+      let hit = false;
+      for (const n of d.nodes) {
+        if (n.agent === e.agent_id) { activeRef.current[n.key] = Date.now() + 2200; hit = true; }
+      }
+      if (hit) setTick((n) => (n + 1) % 1000000);
+    });
+    return unsub;
+  }, []);
+
+  // Sim loop.
+  useEffect(() => {
+    let raf = 0;
+    const loop = () => {
+      if (nodesRef.current.length) stepSimulation(nodesRef.current, edgesRef.current, { width: W, height: H });
+      setTick((n) => (n + 1) % 1000000);
+      raf = requestAnimationFrame(loop);
+    };
+    if (typeof requestAnimationFrame !== "undefined") raf = requestAnimationFrame(loop);
+    return () => cancelAnimationFrame(raf);
+  }, []);
+
+  const nodePos = (id: string) => nodesRef.current.find((n) => n.id === id);
+  const now = Date.now();
+  const nodeByKey = (key: string) => detailRef.current?.nodes.find((n) => n.key === key);
+
+  return (
+    <>
+      <svg ref={svgRef} viewBox={`0 0 ${W} ${H}`} className="grid-bg block h-[60vh] w-full" role="img" aria-label="run graph">
+        {(detail?.edges ?? []).map((e) => {
+          const a = nodePos(e.src);
+          const b = nodePos(e.dst);
+          if (!a || !b) return null;
+          const active = (activeRef.current[e.dst] ?? 0) > now;
+          return (
+            <line
+              key={`re-${e.src}-${e.dst}`}
+              data-run-edge={`${e.src}->${e.dst}`}
+              data-run-edge-active={active ? "true" : "false"}
+              x1={a.x} y1={a.y} x2={b.x} y2={b.y}
+              stroke={active ? "hsl(var(--brand))" : "hsl(var(--foreground) / 0.12)"}
+              strokeWidth={active ? 2 : 1}
+              style={active ? { filter: "drop-shadow(0 0 4px hsl(var(--brand)))" } : undefined}
+            />
+          );
+        })}
+        {(detail?.nodes ?? []).map((n, i) => {
+          const p = nodePos(n.key);
+          if (!p) return null;
+          const active = n.status === "active" || (activeRef.current[n.key] ?? 0) > now;
+          const color = runNodeColor(active ? "active" : n.status);
+          const r = 12;
+          const labelY = i % 2 === 0 ? r + 13 : -(r + 6);
+          return (
+            <g
+              key={n.key}
+              data-run-node={n.key}
+              data-run-node-status={n.status}
+              data-run-node-kind={n.kind}
+              transform={`translate(${p.x},${p.y})`}
+            >
+              {active ? <circle r={r + 6} fill="none" stroke="hsl(var(--brand))" strokeWidth={1} opacity={0.4} className="dot-run" /> : null}
+              <circle r={r} fill="hsl(var(--surface-2))" stroke={color} strokeWidth={2} />
+              <circle r={3} fill={color} />
+              <text y={labelY} textAnchor="middle" className="fill-foreground/80 font-mono" fontSize={10}>
+                {n.key}
+              </text>
+              <text y={i % 2 === 0 ? r + 23 : -(r + 16)} textAnchor="middle" className="fill-muted-foreground font-mono" fontSize={8}>
+                {n.agent}
+              </text>
+            </g>
+          );
+        })}
+      </svg>
+
+      <div className="pointer-events-auto absolute right-3 top-12 flex items-center gap-1 font-mono text-[10px] text-muted-foreground">
+        {runs.length ? (
+          <select
+            aria-label="run"
+            value={runId ?? ""}
+            onChange={(ev) => setRunId(Number(ev.target.value))}
+            className="rounded border border-foreground/10 bg-surface-2 px-1 py-0.5 text-foreground"
+          >
+            {runs.map((r) => (
+              <option key={r.id} value={r.id}>
+                #{r.id} {r.mode} · {r.status}
+              </option>
+            ))}
+          </select>
+        ) : (
+          <span>no runs yet</span>
+        )}
+      </div>
+    </>
   );
 }
 

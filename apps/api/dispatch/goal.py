@@ -287,14 +287,94 @@ def handle_goal_reply(thread, text: str, chat_id: int) -> dict:
     return {"ok": True, "status": "goal_steered", "goal_id": goal_id}
 
 
-def recover_goals() -> int:
-    """On startup, find goals left mid-flight (running/checkin) and mark them
-    paused so a Continue tap resumes from cursor. Returns count."""
+# ── orchestration-engine migration + recovery ──────────────────────────────────
+def migrate_goals_to_runs() -> int:
+    """One-shot: mirror each legacy Goal into a Run(mode="goal") and each
+    Milestone(seq=i) into a RunTask(key=f"m{i}", kind="read", agent="researcher")
+    chained by TaskEdge(src=f"m{i}", dst=f"m{i+1}") — reproducing the old linear
+    order, preserving each node's status/result. Non-destructive (legacy rows are
+    kept read-only for a release) and idempotent: a Goal already mirrored by a
+    goal-mode Run (matched on job_id, else on text) is skipped. Returns the count
+    of newly migrated goals."""
     from sqlmodel import select
+    from models import Run, RunTask, TaskEdge
+
+    migrated = 0
     with session_scope() as s:
-        live = s.exec(select(Goal).where(Goal.status.in_(["running", "checkin", "planning"]))).all()
-        for g in live:
+        for g in s.exec(select(Goal)).all():
+            if g.job_id is not None:
+                exists = s.exec(
+                    select(Run).where(Run.mode == "goal", Run.job_id == g.job_id)
+                ).first()
+            else:
+                exists = s.exec(
+                    select(Run).where(Run.mode == "goal", Run.text == g.text)
+                ).first()
+            if exists:
+                continue
+            run = Run(job_id=g.job_id, text=g.text, mode="goal", status=g.status,
+                      cancel_requested=g.cancel_requested, chat_id=g.chat_id,
+                      created_at=g.created_at, updated_at=g.updated_at)
+            s.add(run)
+            s.commit()
+            s.refresh(run)
+            ms = s.exec(
+                select(Milestone).where(Milestone.goal_id == g.id).order_by(Milestone.seq)
+            ).all()
+            seqs = {m.seq for m in ms}
+            for m in ms:
+                s.add(RunTask(run_id=run.id, key=f"m{m.seq}", agent="researcher",
+                              kind="read", prompt=m.title, status=m.status, result=m.result,
+                              started_at=m.started_at, completed_at=m.completed_at))
+            for m in ms:
+                if (m.seq + 1) in seqs:
+                    s.add(TaskEdge(run_id=run.id, src=f"m{m.seq}", dst=f"m{m.seq + 1}"))
+            s.commit()
+            migrated += 1
+    return migrated
+
+
+def recover_runs() -> int:
+    """Boot recovery for the orchestration engine. First migrate legacy
+    Goal/Milestone rows one-shot, then recover anything left mid-flight:
+    goal-mode Runs → `paused` (a Continue tap resumes); mission-mode Runs → reset
+    any `active` RunTask to `pending` and re-drive (the ready-set loop reruns only
+    non-`done` nodes — `done` results are persisted). Legacy live Goal rows are
+    still paused (kept read-only for a release). Returns the count recovered."""
+    from sqlmodel import select
+    from models import Run, RunTask
+
+    migrate_goals_to_runs()
+    n = 0
+    mission_ids: list[int] = []
+    with session_scope() as s:
+        for r in s.exec(select(Run).where(Run.status.in_(["running", "checkin", "planning"]))).all():
+            if r.mode == "goal":
+                r.status = "paused"
+                r.updated_at = datetime.utcnow()
+                s.add(r)
+            else:
+                for t in s.exec(
+                    select(RunTask).where(RunTask.run_id == r.id, RunTask.status == "active")
+                ):
+                    t.status = "pending"
+                    s.add(t)
+                mission_ids.append(r.id)
+            n += 1
+        # Legacy Goal rows kept read-only this release — still pause live ones.
+        for g in s.exec(select(Goal).where(Goal.status.in_(["running", "checkin", "planning"]))).all():
             g.status = "paused"
             s.add(g)
+            n += 1
         s.commit()
-        return len(live)
+    # Re-drive mission runs (fire-and-forget; no-op without a running loop).
+    from dispatch.orchestrator.dag import launch_run
+    for rid in mission_ids:
+        launch_run(rid)
+    return n
+
+
+def recover_goals() -> int:
+    """Back-compat shim — boot recovery now flows through recover_runs(), which
+    migrates legacy goals and recovers both Runs and legacy Goal rows."""
+    return recover_runs()

@@ -159,15 +159,51 @@ async def _produce_and_reply(intent: Intent, chat_id: int, job_id: int, requeste
 
     day = today_str()
     if intent.task_type == "mission":
-        from dispatch.mission import run_mission
+        # Missions are now DAG Runs driven by the orchestration engine: it
+        # decomposes, fans out across agents, synthesizes + verifies, and surfaces
+        # the dispatch ping + final report to chat itself. Reuse this job row as
+        # the Run's backing Job so there's a single /jobs entry.
+        from dispatch.orchestrator.engine import run_orchestration
 
-        markdown = await run_mission(
-            intent.raw_text,
-            progress=lambda m: send_telegram_message(chat_id, format_telegram(m)),
+        snap = await run_orchestration(
+            intent.raw_text, mode="mission", chat_id=chat_id, job_id=job_id
         )
-    else:
-        prompt = _build_prompt(intent)
-        markdown = await answer.run_agent_for_answer(intent.agent, prompt, job_id)
+        report = snap.get("report") or ""
+        # The engine drives the run and surfaces the dispatch ping + final report
+        # to chat itself, but — as on the direct path — the clean markdown artifact
+        # (browsable in the Files tab) and the Obsidian brain write-back live here,
+        # so a mission report stays browsable and is written back to the vault.
+        artifact = None
+        if report.strip():
+            md_name = f"ceo-{job_id}-{day}.md"
+            md_path = _reports_root() / day / md_name
+            md_path.parent.mkdir(parents=True, exist_ok=True)
+            md_path.write_text(report)
+            meta = {
+                "source": "telegram",
+                "agent": "ceo",
+                "task_type": "mission",
+                "requested_at": requested_at,
+                "prompt": intent.raw_text,
+                "job_id": job_id,
+                "run_id": snap.get("run_id"),
+            }
+            write_artifact_meta(day, md_name, meta)
+            from dispatch.vault_writeback import save_dispatch_to_vault
+            save_dispatch_to_vault("ceo", intent.raw_text, report, day, job_id)
+            artifact = {"date": day, "name": md_name, "path": f"{day}/{md_name}", "meta": meta}
+        _complete_job(job_id, report or "(no output produced)")
+        return {
+            "job_id": job_id,
+            "run_id": snap.get("run_id"),
+            "mode": "mission",
+            "status": snap.get("status"),
+            "artifact": artifact,
+            "summary": _summarize(report or "Mission run."),
+        }
+
+    prompt = _build_prompt(intent)
+    markdown = await answer.run_agent_for_answer(intent.agent, prompt, job_id)
     if not markdown.strip():
         markdown = "(No output produced.)"
 

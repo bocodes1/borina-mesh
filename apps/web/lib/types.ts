@@ -102,3 +102,33 @@ export interface AgentRun {
   cost_usd: number;
   created_at: string;
 }
+
+// ── Orchestration runs (DAG) ────────────────────────────────────────────────
+export interface Run {
+  id: number;
+  mode: string;            // mission | goal
+  status: string;          // planning|running|checkin|paused|done|aborted|failed
+  text?: string;
+  node_counts?: Record<string, number>;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface RunNode {
+  key: string;
+  agent: string;
+  kind: string;            // read | write | verify | synthesize
+  status: string;          // pending|ready|active|done|skipped|blocked|awaiting_approval|failed
+  result?: string | null;
+}
+
+export interface RunEdge {
+  src: string;
+  dst: string;
+}
+
+export interface RunDetail {
+  run: Run;
+  nodes: RunNode[];
+  edges: RunEdge[];
+}

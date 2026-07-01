@@ -288,9 +288,83 @@ def _handle_callback(data: str, chat_id: int) -> dict:
         return _handle_fleet_callback(action, data, chat_id)
     if action == "goal":
         return _handle_goal_callback(data, chat_id)
+    if action == "run":
+        return _handle_run_callback(data, chat_id)
     if action == "apply":
         return _handle_apply_callback(data, chat_id)
     return {"ok": True, "status": "unknown_action"}
+
+
+def _handle_run_callback(data: str, chat_id: int) -> dict:
+    """Orchestration write-node approval: run:approve|reject:{task_id}.
+
+    This callback is the ONLY place an engine write reaches `user_initiated=True`
+    — the exact gate at `integrations/google_calendar.py:101`. It is reachable
+    only behind the fail-closed allow-list (process_update), exactly like every
+    other Card tap. The driver itself never sets that flag (it parks the node in
+    `awaiting_approval`); approval here executes the write, marks the node done,
+    and relaunches the driver to unblock dependents."""
+    from db import session_scope
+    from dispatch.orchestrator import dag
+    from models import RunTask
+
+    parts = data.split(":")
+    verb = parts[1] if len(parts) > 1 else ""
+    try:
+        task_id = int(parts[2]) if len(parts) > 2 else 0
+    except ValueError:
+        return {"ok": True, "status": "run_bad"}
+
+    if verb == "reject":
+        run_id = dag.reject_write(task_id)
+        if run_id is None:
+            return {"ok": True, "status": "run_missing"}
+        dag.launch_run(run_id)  # continue any remaining branches
+        dispatcher.send_telegram_message(chat_id, format_telegram(f"Write {task_id} rejected; dependents skipped."))
+        return {"ok": True, "status": "run_reject", "task_id": task_id}
+
+    if verb == "approve":
+        with session_scope() as s:
+            t = s.get(RunTask, task_id)
+            if t is None:
+                return {"ok": True, "status": "run_missing"}
+            # Replay/state guard: the inline button persists after a tap, so a
+            # double-tap (or run:approve against a non-write/read node) must NOT
+            # re-execute the calendar write. Only a write node still parked in
+            # awaiting_approval is a live, un-decided approval. Mirrors the
+            # planner's already_decided guard (_handle_plan_callback).
+            if t.kind != "write" or t.status != "awaiting_approval":
+                return {"ok": True, "status": "run_approve", "task_id": task_id, "toast": "Already done"}
+            intent = t.prompt or ""
+        # The user-initiated write — the engine never reaches this flag.
+        from integrations import google_calendar
+        event = _run_write_event(intent)
+        try:
+            google_calendar.create_event(event, user_initiated=True)
+        except Exception as exc:  # noqa: BLE001
+            dispatcher.send_telegram_message(chat_id, format_telegram(f"Write {task_id} failed: {exc}"))
+            return {"ok": True, "status": "run_write_error", "task_id": task_id}
+        run_id = dag.complete_write(task_id, "(calendar write approved & executed)")
+        if run_id is not None:
+            dag.launch_run(run_id)  # unblock downstream nodes
+        dispatcher.send_telegram_message(chat_id, format_telegram(f"Write {task_id} approved & executed."))
+        return {"ok": True, "status": "run_approve", "task_id": task_id}
+
+    return {"ok": True, "status": "run_unknown"}
+
+
+def _run_write_event(intent: str) -> dict:
+    """Build a calendar event payload from a write node's intent. v1 is
+    calendar-only: a JSON intent is used verbatim, otherwise the text becomes a
+    summary. (The hard `user_initiated` gate is enforced regardless.)"""
+    import json
+    try:
+        obj = json.loads(intent)
+        if isinstance(obj, dict):
+            return obj.get("event") if isinstance(obj.get("event"), dict) else obj
+    except Exception:  # noqa: BLE001
+        pass
+    return {"summary": (intent or "Untitled").strip()[:300]}
 
 
 def _handle_goal_callback(data: str, chat_id: int) -> dict:
@@ -648,20 +722,22 @@ def process_update(update: dict) -> dict:
         )
         return {"ok": True, "status": "build_started", "job_id": job_id}
 
-    # 2b1b. Goal: long-horizon runner — decompose → milestones → check-ins.
+    # 2b1b. Goal: long-horizon runner — now a goal-mode DAG Run on the engine
+    # (decompose → ready-set drive → check-ins at phase boundaries).
     gm = _GOAL_RE.match(text)
     if gm:
-        from dispatch import goal as goal_mod
-        goal_id = goal_mod.create_goal(gm.group("goal").strip(), chat_id)
+        from dispatch.orchestrator import engine as orch
+        goal_text = gm.group("goal").strip()
+        run_id, _job_id = orch.create_run(goal_text, "goal", chat_id)
         sent_id = dispatcher.send_telegram_message(
             chat_id,
-            format_telegram(f"{heard}Goal {goal_id} started — I'll check in after each milestone. "
+            format_telegram(f"{heard}Goal run {run_id} started — I'll check in at phase boundaries. "
                             f"Reply to a check-in to steer, or tap Abort."),
         )
-        # Anchor the goal thread by goal id so replies steer it.
-        dispatcher._record_thread(chat_id, sent_id, "goal", goal_id, gm.group("goal").strip())
-        goal_mod.launch_goal(goal_id)
-        return {"ok": True, "status": "goal_started", "goal_id": goal_id}
+        # Anchor the run thread by run id so replies steer it.
+        dispatcher._record_thread(chat_id, sent_id, "run", run_id, goal_text)
+        orch.launch_orchestration(run_id, "goal", chat_id, goal_text)
+        return {"ok": True, "status": "goal_started", "run_id": run_id}
 
     # 2b1c. Apply: internship pipeline (propose-only) — covers BOTH cold-email
     # targets and job-board postings. Stage each kind and post one approval card
@@ -734,6 +810,10 @@ def process_update(update: dict) -> dict:
             from dispatch import goal as goal_mod
 
             return goal_mod.handle_goal_reply(thread, text, chat_id)
+        if thread and thread.agent_id == "run":
+            from dispatch.orchestrator import engine as orch
+
+            return orch.handle_run_reply(thread, text, chat_id)
         if thread:
             from dispatch.intent import detect_forbidden
 
