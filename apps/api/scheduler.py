@@ -226,6 +226,48 @@ class SchedulerService:
         except Exception as e:
             print(f"[scheduler] Failed to register trader-health: {e}")
 
+    async def _run_deskview_alerts(self) -> None:
+        """Cheap NON-LLM watcher for the cex-lag trading bot's own SQLite log
+        (heartbeat silence, new resolved fills, kill-switch runway). Alerts on
+        transitions only; inert when the bot DB doesn't exist on this box."""
+        import os
+        try:
+            from agents.deskview_alerts import run as check_deskview
+            alerts = check_deskview()
+        except Exception as e:  # noqa: BLE001
+            print(f"[scheduler] deskview-alerts error: {e}")
+            return
+        if not alerts:
+            return
+        try:
+            chat = os.getenv("TELEGRAM_CHAT_ID", "").strip()
+            if chat:
+                from dispatch import dispatcher
+                from dispatch.telegram_format import format_telegram
+                for line in alerts:
+                    dispatcher.send_telegram_message(int(chat), format_telegram(line))
+            print(f"[scheduler] deskview-alerts: {len(alerts)} alert(s) sent")
+        except Exception as e:  # noqa: BLE001
+            print(f"[scheduler] deskview-alerts send error: {e}")
+
+    def register_deskview_alerts(self) -> None:
+        """Register the non-LLM deskview/bot watcher every 10 minutes."""
+        job_id = "deskview-alerts"
+        if self._scheduler.get_job(job_id):
+            return
+        try:
+            trigger = parse_cron("*/10 * * * *")
+            self._scheduler.add_job(
+                self._run_deskview_alerts,
+                trigger=trigger,
+                id=job_id,
+                replace_existing=True,
+            )
+            self._schedules["deskview-alerts"] = "*/10 * * * *"
+            print("[scheduler] Registered default: deskview-alerts (non-LLM) @ */10")
+        except Exception as e:
+            print(f"[scheduler] Failed to register deskview-alerts: {e}")
+
     async def _run_digest(self) -> None:
         """Run the wiki daily digest."""
         try:
