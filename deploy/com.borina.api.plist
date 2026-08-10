@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Borina Mesh API (native, subscription/subprocess auth).
+
+  Before installing:
+    1. Replace __HOME__ with your home dir (echo $HOME), or install via the
+       sed one-liner in docs/DEPLOY_MAC_MINI.md which does it for you.
+    2. PATH below MUST contain the dir from `which claude` and your Homebrew
+       bin, or subprocess auth fails silently. Defaults assume Apple-Silicon
+       Homebrew (/opt/homebrew/bin) + npm-global. On Intel Macs use
+       /usr/local/bin. Add ~/.npm-global/bin only if that's where claude lives.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.borina.api</string>
+
+    <key>WorkingDirectory</key>
+    <string>__HOME__/borina-mesh/apps/api</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>__HOME__/borina-mesh/apps/api/.venv/bin/python</string>
+        <string>-m</string>
+        <string>uvicorn</string>
+        <string>main:app</string>
+        <string>--host</string>
+        <string>0.0.0.0</string>
+        <string>--port</string>
+        <string>8000</string>
+    </array>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PYTHONUTF8</key>
+        <string>1</string>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/opt/homebrew/sbin:__HOME__/.npm-global/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>__HOME__/borina-mesh/apps/api/launchd-api.log</string>
+    <key>StandardErrorPath</key>
+    <string>__HOME__/borina-mesh/apps/api/launchd-api.log</string>
+</dict>
+</plist>

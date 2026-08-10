@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Borina Mesh web frontend (Next.js production server).
+
+  Before installing:
+    1. Replace __HOME__ with your home dir (the sed one-liner in
+       docs/DEPLOY_MAC_MINI.md does this).
+    2. Run `npm run build` in apps/web first — this serves the built app.
+    3. node path below assumes Apple-Silicon Homebrew (/opt/homebrew/bin/node).
+       On Intel Macs use /usr/local/bin/node. Check with `which node`.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.borina.web</string>
+
+    <key>WorkingDirectory</key>
+    <string>__HOME__/borina-mesh/apps/web</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/opt/homebrew/bin/node</string>
+        <string>__HOME__/borina-mesh/apps/web/node_modules/next/dist/bin/next</string>
+        <string>start</string>
+        <string>-H</string>
+        <string>0.0.0.0</string>
+        <string>-p</string>
+        <string>3000</string>
+    </array>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+        <key>NODE_ENV</key>
+        <string>production</string>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>__HOME__/borina-mesh/apps/web/launchd-web.log</string>
+    <key>StandardErrorPath</key>
+    <string>__HOME__/borina-mesh/apps/web/launchd-web.log</string>
+</dict>
+</plist>

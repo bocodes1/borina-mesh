@@ -31,7 +31,6 @@ class FinanceAgent(Agent):
         "anything else."
     )
     tools = ["web_fetch", "read_file", "write_file"]
-    model = "claude-opus-4-6"
 
 
 registry.register(FinanceAgent)

@@ -1,0 +1,5 @@
+# Deploy-critical files must stay LF so they work on the Mac Mini.
+# A CRLF shebang breaks shell scripts ("bash\r: bad interpreter").
+*.sh        text eol=lf
+*.plist     text eol=lf
+scripts/*   text eol=lf

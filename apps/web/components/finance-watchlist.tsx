@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Plus, X, ExternalLink } from "lucide-react";
+import Link from "next/link";
+import { Plus, X, ExternalLink, BarChart2 } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -106,13 +107,22 @@ export function FinanceWatchlist() {
             {tickers.map((t) => (
               <div
                 key={t}
-                className="flex items-center justify-between gap-2 p-2 rounded hover:bg-accent/50 transition-colors"
+                className="flex items-center gap-2 p-2 rounded hover:bg-accent/50 transition-colors"
               >
-                <button
-                  onClick={() => openTicker(t)}
-                  className="font-mono font-medium text-sm flex-1 text-left hover:text-primary"
+                <Link
+                  href={`/finance/${t}`}
+                  className="font-mono font-medium text-sm flex-1 hover:text-primary"
+                  title="Open deep-dive"
                 >
                   {t}
+                </Link>
+                <button
+                  onClick={() => openTicker(t)}
+                  className="text-muted-foreground hover:text-foreground p-1"
+                  aria-label={`Quick stats for ${t}`}
+                  title="Quick stats"
+                >
+                  <BarChart2 className="h-3.5 w-3.5" />
                 </button>
                 <button
                   onClick={() => removeTicker(t)}

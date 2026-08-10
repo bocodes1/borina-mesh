@@ -158,24 +158,41 @@ def _clean_brief_output(raw: str) -> str:
     if not raw:
         return ""
 
-    # Anchor on the brief's H1. The model writes "# Morning Brief — DATE", but
-    # claude's TUI re-renders that as "⏺ Morning Brief — DATE" (no literal #).
-    # So match the unique "Morning Brief —" signature regardless of prefix.
+    # Anchor on the first H1 the model emitted. Claude's TUI swallows the
+    # literal `#` for H1s, so we match either:
+    #   "# Morning Brief — DATE"  (morning brief mode)
+    #   "TICKER — Company Name"   (deep-dive equity, after `#` stripped)
+    #   "SYMBOL — Asset Name"     (deep-dive crypto)
+    # The deep-dive H1 always has the em-dash separator and is the FIRST line
+    # of the model's actual output, so anchor on the first non-prompt-echo
+    # line that contains "—" and looks like a title.
     lines = raw.splitlines()
     start = 0
     for i, ln in enumerate(lines):
         stripped = ln.lstrip(" ⏺#").strip()
+        # Morning brief
         if stripped.startswith("Morning Brief"):
             start = i
-            # Restore the markdown H1 so react-markdown renders it as a heading.
             lines[i] = "# " + stripped
             break
+        # Deep-dive H1: looks like "TICKER — Company Name" — short ticker (1-5
+        # chars, all alpha), em-dash, then content. Skip lines that contain
+        # paths or URLs.
+        if "—" in stripped and "/" not in stripped and len(stripped) < 120:
+            head = stripped.split("—", 1)[0].strip()
+            if 1 <= len(head) <= 6 and head.replace("-", "").replace(".", "").isalnum() and head.upper() == head:
+                start = i
+                lines[i] = "# " + stripped
+                break
 
-    # Anchor the end on the brief's footer — BRIEF_FORMAT requires
-    # "End of brief. Generated at {timestamp}." Cut anything past that.
+    # Anchor the end on the brief/deep-dive footer.
+    #   "End of brief. Generated at..."  (morning brief)
+    #   "Generated in Xs. Cached until..."  (deep-dive)
     end = len(lines)
     for i in range(start, len(lines)):
-        if "End of brief" in lines[i]:
+        if "End of brief" in lines[i] or (
+            "Generated in" in lines[i] and "Cached until" in lines[i]
+        ):
             end = i + 1
             break
 

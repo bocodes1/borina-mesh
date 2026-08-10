@@ -13,6 +13,7 @@ interface Stats {
 export function MissionControl() {
   const [stats, setStats] = useState<Stats>({ active: 0, queued: 0, today: 0 });
   const [currentTime, setCurrentTime] = useState("");
+  const [host, setHost] = useState("—");
 
   useEffect(() => {
     const fetchStats = () => {
@@ -35,6 +36,11 @@ export function MissionControl() {
     return () => clearInterval(interval);
   }, []);
 
+  // Read hostname on the client only — reading it during render mismatches SSR.
+  useEffect(() => {
+    setHost(window.location.hostname);
+  }, []);
+
   return (
     <motion.div
       initial={{ opacity: 0, y: -10 }}
@@ -53,7 +59,7 @@ export function MissionControl() {
         <StatItem icon={<Activity className="h-4 w-4" />} label="active" value={stats.active} />
         <StatItem icon={<Clock className="h-4 w-4" />} label="queued" value={stats.queued} />
         <StatItem icon={<Zap className="h-4 w-4" />} label="today" value={stats.today} />
-        <StatItem icon={<Server className="h-4 w-4" />} label="host" value={typeof window !== "undefined" ? window.location.hostname : "—"} />
+        <StatItem icon={<Server className="h-4 w-4" />} label="host" value={host} />
       </div>
       <div className="font-mono text-sm text-muted-foreground tabular-nums">{currentTime}</div>
     </motion.div>
