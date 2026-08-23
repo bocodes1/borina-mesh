@@ -6,7 +6,7 @@ day's window; a nightly trim keeps the table bounded.
 """
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 
 from sqlmodel import select
 
@@ -29,16 +29,21 @@ def log_message(chat_id: int, role: str, text: str) -> None:
 
 def recent_for_day(day: str) -> list[dict]:
     """Messages whose created_at falls on `day` (YYYY-MM-DD), oldest-first.
-    Returns [] on any error."""
+    Filters in SQL (a date range, not a full-table scan + Python filter — this
+    got a second writer in Phase D2's correction channel, worth not scanning
+    the whole table for). Returns [] on any error."""
     try:
+        start = datetime.combine(date.fromisoformat(day), datetime.min.time())
+        end = start + timedelta(days=1)
         with session_scope() as s:
             rows = s.exec(
-                select(ConversationLog).order_by(ConversationLog.created_at)
+                select(ConversationLog)
+                .where(ConversationLog.created_at >= start, ConversationLog.created_at < end)
+                .order_by(ConversationLog.created_at)
             ).all()
         return [
             {"role": r.role, "text": r.text, "at": r.created_at.isoformat()}
             for r in rows
-            if r.created_at.date().isoformat() == day
         ]
     except Exception:  # noqa: BLE001
         return []

@@ -18,6 +18,8 @@ vi.mock("@/lib/api", () => ({
     generateDailyPlan: vi.fn(() => Promise.resolve({})),
     // pipeline-health strip (also on the /daily page) — default to "no data"
     getPipelineHealth: vi.fn(() => Promise.resolve({ pipelines: [], findings: [], max_age_hours: 36 })),
+    // correction note (also on the /daily page)
+    addCorrection: vi.fn(() => Promise.resolve({ ok: true })),
   },
 }));
 vi.mock("next/navigation", () => ({ usePathname: () => "/daily" }));

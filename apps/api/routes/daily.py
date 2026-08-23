@@ -5,6 +5,7 @@ Mounted at `/daily` (frontend: `/api/daily/...`). Tasks CRUD lives in
 the brief's daily-relevant sections + live weather + open tasks.
 """
 from fastapi import APIRouter, Depends, Query, HTTPException
+from pydantic import BaseModel
 from sqlmodel import Session, select
 
 from db import get_session
@@ -44,6 +45,27 @@ def full_brief():
     if not brief:
         return {"date": today_str(), "exists": False, "raw": None, "sections": {}}
     return {"date": brief["date"], "exists": True, "raw": brief["raw"], "sections": brief["sections"]}
+
+
+class CorrectionCreate(BaseModel):
+    text: str
+
+
+@router.post("/correction", status_code=201)
+def add_correction(body: CorrectionCreate):
+    """A direct, explicit note from Bo for the nightly learner — e.g. correcting
+    something ambient-inferred, or flagging what actually mattered today. Goes
+    through the conversation log (role="correction") so it reaches
+    operator_brain.LEARNER_PROMPT's {conversation} signal with no extra
+    plumbing; the prompt tells the learner to treat it as ground truth. Not a
+    real Telegram chat — chat_id=0 is a sentinel, never routed anywhere else."""
+    text = (body.text or "").strip()
+    if not text:
+        raise HTTPException(422, "text must not be empty")
+    from conversation_log import log_message
+
+    log_message(0, "correction", text)
+    return {"ok": True}
 
 
 @router.post("/generate", status_code=201)

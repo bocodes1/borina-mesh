@@ -107,6 +107,7 @@ class Task(SQLModel, table=True):
     done: bool = Field(default=False, index=True)
     sort_order: int = Field(default=0)
     created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
+    completed_at: Optional[datetime] = None
 
 
 class Goal(SQLModel, table=True):

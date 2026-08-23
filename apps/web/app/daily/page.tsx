@@ -9,6 +9,7 @@ import { Navbar } from "@/components/navbar";
 import { TodaysPlan } from "@/components/todays-plan";
 import { PipelineHealthStrip } from "@/components/pipeline-health-strip";
 import { MarkdownOutput } from "@/components/markdown-output";
+import { CorrectionNote } from "@/components/correction-note";
 import { SectionHeader } from "@/components/ui/section-header";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ErrorState } from "@/components/ui/error-state";
@@ -204,6 +205,7 @@ function DailyBody() {
               )}
             </div>
           </div>
+          <CorrectionNote />
           {calendar ? (
             <div>
               <SectionHeader title="Calendar" icon={<CalendarClock className="h-4 w-4" />} description="Today's events, from the brief" />

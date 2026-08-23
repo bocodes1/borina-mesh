@@ -71,6 +71,10 @@ def update_task(task_id: int, body: TaskUpdate, session: Session = Depends(get_s
         raise HTTPException(404, "task not found")
     _validate(body.tag, body.priority)
     data = body.model_dump(exclude_unset=True)
+    if data.get("done") is True and not task.done:
+        data["completed_at"] = datetime.utcnow()
+    elif data.get("done") is False:
+        data["completed_at"] = None
     for key, value in data.items():
         setattr(task, key, value)
     session.add(task)

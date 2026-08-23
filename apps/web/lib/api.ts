@@ -101,6 +101,8 @@ export const api = {
   getDailySummary: () => fetchJSON<DailySummary>("/daily/summary"),
   getDailyBrief: () => fetchJSON<DailyBriefResponse>("/daily/brief"),
   getPipelineHealth: () => fetchJSON<PipelineHealthResponse>("/health/pipelines"),
+  addCorrection: (text: string) =>
+    fetchJSON<{ ok: boolean }>("/daily/correction", { method: "POST", body: JSON.stringify({ text }) }),
   generateDailyBrief: (useAgent = false) =>
     fetchJSON<{ written: string; date: string; sections_found: string[] }>(
       `/daily/generate?use_agent=${useAgent}`,
@@ -241,6 +243,7 @@ export interface TaskItem {
   done: boolean;
   sort_order: number;
   created_at: string;
+  completed_at: string | null;
 }
 
 export interface DailySummary {
