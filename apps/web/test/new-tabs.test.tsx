@@ -16,6 +16,8 @@ vi.mock("@/lib/api", () => ({
     approvePlanItem: vi.fn(() => Promise.resolve({ status: "approved" })),
     rejectPlanItem: vi.fn(() => Promise.resolve({ status: "rejected" })),
     generateDailyPlan: vi.fn(() => Promise.resolve({})),
+    // pipeline-health strip (also on the /daily page) — default to "no data"
+    getPipelineHealth: vi.fn(() => Promise.resolve({ pipelines: [], findings: [], max_age_hours: 36 })),
   },
 }));
 vi.mock("next/navigation", () => ({ usePathname: () => "/daily" }));

@@ -6,6 +6,7 @@ import { api, type DailySummary, type TaskItem } from "@/lib/api";
 import { useAsync } from "@/lib/use-async";
 import { Navbar } from "@/components/navbar";
 import { TodaysPlan } from "@/components/todays-plan";
+import { PipelineHealthStrip } from "@/components/pipeline-health-strip";
 import { SectionHeader } from "@/components/ui/section-header";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ErrorState } from "@/components/ui/error-state";
@@ -117,6 +118,9 @@ function DailyBody() {
             No brief yet today — generate one from the data sources you’ve connected.
           </p>
         )}
+        <div className="mt-4 border-t border-border/40 pt-3">
+          <PipelineHealthStrip />
+        </div>
       </div>
 
       <TodaysPlan />

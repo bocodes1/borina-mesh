@@ -95,6 +95,27 @@ async def test_update_profile_trims_old_conversation(monkeypatch, tmp_path):
     assert res["trimmed"] >= 1
 
 
+@pytest.mark.asyncio
+async def test_call_agent_uses_operator_runner_id(monkeypatch):
+    """Regression: the nightly learner must run under the "operator" agent id,
+    not "planner" — they map to distinct tmux sessions/workdirs. Using the
+    wrong id silently shares the ever-growing 6:30am planner session instead."""
+    import agents.runner_v2 as runner_v2
+
+    calls = []
+
+    async def fake_run_agent_task(agent_id, prompt):
+        calls.append(agent_id)
+        class Result:
+            output = "ok"
+        return Result()
+
+    monkeypatch.setattr(runner_v2, "run_agent_task", fake_run_agent_task)
+
+    await ob._call_agent("some prompt")
+    assert calls == ["operator"]
+
+
 def test_gather_signals_includes_today_task(monkeypatch, tmp_path):
     from db import session_scope
     from models import Task

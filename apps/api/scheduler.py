@@ -5,6 +5,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 from events import bus, ActivityEvent
+from logutil import log_ts
 
 
 def _msoauth_connectable() -> bool:
@@ -88,7 +89,7 @@ class SchedulerService:
                 s.add(row)
                 s.commit()
         except Exception as e:  # noqa: BLE001
-            print(f"[scheduler] could not persist cron for {agent_id}: {e}")
+            print(f"{log_ts()} [scheduler] could not persist cron for {agent_id}: {e}")
 
     def list_schedules(self) -> dict[str, str]:
         return dict(self._schedules)
@@ -154,9 +155,9 @@ class SchedulerService:
             try:
                 self.set_schedule(agent_id, cron)
                 self._persist_cron(agent_id, cron)
-                print(f"[scheduler] Registered default: {agent_id} @ {cron}")
+                print(f"{log_ts()} [scheduler] Registered default: {agent_id} @ {cron}")
             except Exception as e:
-                print(f"[scheduler] Failed to register {agent_id}: {e}")
+                print(f"{log_ts()} [scheduler] Failed to register {agent_id}: {e}")
 
         # Wiki daily digest — runs at 8 AM UTC, sends Telegram summary of
         # yesterday's reviewer rejections.
@@ -173,7 +174,7 @@ class SchedulerService:
                 self._schedules["wiki-daily-digest"] = "0 8 * * *"
                 print("[scheduler] Registered default: wiki-daily-digest @ 0 8 * * *")
             except Exception as e:
-                print(f"[scheduler] Failed to register wiki digest: {e}")
+                print(f"{log_ts()} [scheduler] Failed to register wiki digest: {e}")
 
     async def _run_trader_health(self) -> None:
         """Cheap NON-LLM uptime ping for the trading bot (replaces the old */30
@@ -204,9 +205,9 @@ class SchedulerService:
                     int(chat),
                     format_telegram(f"⚠️ Trading bot health check failed: {detail}"),
                 )
-            print(f"[scheduler] trader-health: DOWN ({detail})")
+            print(f"{log_ts()} [scheduler] trader-health: DOWN ({detail})")
         except Exception as e:  # noqa: BLE001
-            print(f"[scheduler] trader-health alert error: {e}")
+            print(f"{log_ts()} [scheduler] trader-health alert error: {e}")
 
     def register_trader_health(self) -> None:
         """Register the non-LLM trader uptime ping every 10 minutes (§A1)."""
@@ -224,7 +225,7 @@ class SchedulerService:
             self._schedules["trader-health"] = "*/10 * * * *"
             print("[scheduler] Registered default: trader-health (non-LLM) @ */10")
         except Exception as e:
-            print(f"[scheduler] Failed to register trader-health: {e}")
+            print(f"{log_ts()} [scheduler] Failed to register trader-health: {e}")
 
     async def _run_deskview_alerts(self) -> None:
         """Cheap NON-LLM watcher for the cex-lag trading bot's own SQLite log
@@ -235,7 +236,7 @@ class SchedulerService:
             from agents.deskview_alerts import run as check_deskview
             alerts = check_deskview()
         except Exception as e:  # noqa: BLE001
-            print(f"[scheduler] deskview-alerts error: {e}")
+            print(f"{log_ts()} [scheduler] deskview-alerts error: {e}")
             return
         if not alerts:
             return
@@ -246,9 +247,9 @@ class SchedulerService:
                 from dispatch.telegram_format import format_telegram
                 for line in alerts:
                     dispatcher.send_telegram_message(int(chat), format_telegram(line))
-            print(f"[scheduler] deskview-alerts: {len(alerts)} alert(s) sent")
+            print(f"{log_ts()} [scheduler] deskview-alerts: {len(alerts)} alert(s) sent")
         except Exception as e:  # noqa: BLE001
-            print(f"[scheduler] deskview-alerts send error: {e}")
+            print(f"{log_ts()} [scheduler] deskview-alerts send error: {e}")
 
     def register_deskview_alerts(self) -> None:
         """Register the non-LLM deskview/bot watcher every 10 minutes."""
@@ -266,16 +267,16 @@ class SchedulerService:
             self._schedules["deskview-alerts"] = "*/10 * * * *"
             print("[scheduler] Registered default: deskview-alerts (non-LLM) @ */10")
         except Exception as e:
-            print(f"[scheduler] Failed to register deskview-alerts: {e}")
+            print(f"{log_ts()} [scheduler] Failed to register deskview-alerts: {e}")
 
     async def _run_digest(self) -> None:
         """Run the wiki daily digest."""
         try:
             from wiki_engine.digest import send_daily_digest
             count = await send_daily_digest()
-            print(f"[scheduler] wiki digest sent ({count} rejections)")
+            print(f"{log_ts()} [scheduler] wiki digest sent ({count} rejections)")
         except Exception as e:
-            print(f"[scheduler] wiki digest error: {e}")
+            print(f"{log_ts()} [scheduler] wiki digest error: {e}")
 
     async def _run_finance_brief(self) -> None:
         """5am ET finance brief — runs the screen, asks the agent to write up."""
@@ -288,16 +289,19 @@ class SchedulerService:
                 f"({brief.duration_seconds}s, {len(brief.markdown)} chars)"
             )
         except Exception as e:
-            print(f"[scheduler] finance brief error: {e}")
+            print(f"{log_ts()} [scheduler] finance brief error: {e}")
 
     async def _run_schedule_daily(self) -> None:
         """Generate the daily brief and write reports/{today}/daily-brief.md."""
+        from pipeline_status import record_pipeline_run
         try:
             from schedule_daily import generate_daily_brief
             path = await generate_daily_brief(use_agent=True)
-            print(f"[scheduler] schedule_daily wrote {path}")
+            print(f"{log_ts()} [scheduler] schedule_daily wrote {path}")
+            record_pipeline_run("schedule-daily", True, f"wrote {path}")
         except Exception as e:
-            print(f"[scheduler] schedule_daily error: {e}")
+            print(f"{log_ts()} [scheduler] schedule_daily error: {e}")
+            record_pipeline_run("schedule-daily", False, str(e))
 
     def register_schedule_daily(self) -> None:
         """Register the daily brief job at 6am America/New_York (spec §8)."""
@@ -320,23 +324,27 @@ class SchedulerService:
             self._schedules["schedule-daily"] = "0 6 * * * America/New_York"
             print("[scheduler] Registered default: schedule-daily @ 6am ET")
         except Exception as e:
-            print(f"[scheduler] Failed to register schedule_daily: {e}")
+            print(f"{log_ts()} [scheduler] Failed to register schedule_daily: {e}")
 
     async def _run_planner(self) -> None:
         """Generate the daily plan proposal (NEVER writes the calendar) + send a
         terse Telegram digest. Approval happens later via /daily or Telegram."""
+        from pipeline_status import record_pipeline_run
         try:
             from planner import generate_plan_with_agent, plan_digest_text
             summary = await generate_plan_with_agent()
-            print(f"[scheduler] planner ({summary['source']}) proposed {summary['task_count']} tasks + {summary['calendar_count']} changes")
+            print(f"{log_ts()} [scheduler] planner ({summary['source']}) proposed {summary['task_count']} tasks + {summary['calendar_count']} changes")
             import os
             chat = os.getenv("TELEGRAM_CHAT_ID", "").strip()
             if chat:
                 from dispatch import dispatcher
                 from dispatch.telegram_format import format_telegram
                 dispatcher.send_telegram_message(int(chat), format_telegram(plan_digest_text()))
+            record_pipeline_run("planner", True,
+                                 f"{summary['task_count']} tasks + {summary['calendar_count']} changes")
         except Exception as e:
-            print(f"[scheduler] planner error: {e}")
+            print(f"{log_ts()} [scheduler] planner error: {e}")
+            record_pipeline_run("planner", False, str(e))
 
     def register_planner(self) -> None:
         """Register the planner job at 6:30am America/New_York — the single
@@ -359,7 +367,7 @@ class SchedulerService:
             self._schedules["planner"] = "30 6 * * * America/New_York"
             print("[scheduler] Registered default: planner @ 6:30am ET")
         except Exception as e:
-            print(f"[scheduler] Failed to register planner: {e}")
+            print(f"{log_ts()} [scheduler] Failed to register planner: {e}")
 
     def register_finance_brief(self) -> None:
         """Register the finance brief job at 5am America/New_York.
@@ -390,7 +398,7 @@ class SchedulerService:
             self._schedules["finance-brief"] = "0 5 * * * America/New_York"
             print("[scheduler] Registered default: finance-brief @ 5am ET")
         except Exception as e:
-            print(f"[scheduler] Failed to register finance brief: {e}")
+            print(f"{log_ts()} [scheduler] Failed to register finance brief: {e}")
 
     async def _run_fleet_health(self) -> None:
         """Weekly: compute fleet-health findings and send the health Card. Does
@@ -406,9 +414,9 @@ class SchedulerService:
             if chat:
                 from dispatch.cards import send_card
                 send_card(int(chat), health_card(findings))
-            print(f"[scheduler] fleet-health: {len(findings)} finding(s)")
+            print(f"{log_ts()} [scheduler] fleet-health: {len(findings)} finding(s)")
         except Exception as e:
-            print(f"[scheduler] fleet-health error: {e}")
+            print(f"{log_ts()} [scheduler] fleet-health error: {e}")
 
     def register_fleet_health(self) -> None:
         """Weekly fleet-health report — Mondays 08:00 ET."""
@@ -427,7 +435,44 @@ class SchedulerService:
             self._schedules["fleet-health"] = "0 8 * * mon America/New_York"
             print("[scheduler] Registered default: fleet-health @ Mon 8am ET")
         except Exception as e:
-            print(f"[scheduler] Failed to register fleet-health: {e}")
+            print(f"{log_ts()} [scheduler] Failed to register fleet-health: {e}")
+
+    async def _run_pipeline_health(self) -> None:
+        """Daily 08:00 ET, after both morning briefs have had a chance to run:
+        flag any tracked pipeline that's gone stale/failing. Only sends a Card
+        when there's something to flag (unlike the weekly fleet-health digest,
+        a daily "all green" would just be noise)."""
+        try:
+            import os
+            from pipeline_status import pipeline_health
+            findings = pipeline_health()
+            if findings:
+                chat = os.getenv("TELEGRAM_CHAT_ID", "").strip()
+                if chat:
+                    from dispatch.cards import send_card
+                    from fleet.cards import health_card
+                    send_card(int(chat), health_card(findings))
+            print(f"{log_ts()} [scheduler] pipeline-health: {len(findings)} finding(s)")
+        except Exception as e:
+            print(f"{log_ts()} [scheduler] pipeline-health error: {e}")
+
+    def register_pipeline_health(self) -> None:
+        """Daily pipeline-health check — 08:00 ET."""
+        try:
+            from zoneinfo import ZoneInfo
+            tz = ZoneInfo("America/New_York")
+        except Exception:
+            tz = None
+        job_id = "pipeline-health"
+        if self._scheduler.get_job(job_id):
+            return
+        try:
+            trigger = CronTrigger(hour=8, minute=0, timezone=tz) if tz else CronTrigger(hour=13, minute=0)
+            self._scheduler.add_job(self._run_pipeline_health, trigger=trigger, id=job_id, replace_existing=True)
+            self._schedules["pipeline-health"] = "0 8 * * * America/New_York"
+            print("[scheduler] Registered default: pipeline-health @ 8am ET")
+        except Exception as e:
+            print(f"{log_ts()} [scheduler] Failed to register pipeline-health: {e}")
 
     def _digest_card(self):
         """Weekly outreach digest (read-only): N sent, M replies, K awaiting
@@ -494,14 +539,14 @@ class SchedulerService:
                         f"Approve each with the buttons."
                     ),
                 )
-                print(f"[scheduler] apply-weekly: {n_email + n_post} card(s), "
+                print(f"{log_ts()} [scheduler] apply-weekly: {n_email + n_post} card(s), "
                       f"{reply_summary.get('matched', 0)} repl(ies)")
             else:
                 staged = email_summary.get("staged", 0) + posting_summary.get("staged", 0)
-                print(f"[scheduler] apply-weekly: staged {staged}, "
+                print(f"{log_ts()} [scheduler] apply-weekly: staged {staged}, "
                       f"{reply_summary.get('matched', 0)} repl(ies) (no chat configured)")
         except Exception as e:
-            print(f"[scheduler] apply-weekly error: {e}")
+            print(f"{log_ts()} [scheduler] apply-weekly error: {e}")
 
     def register_apply_weekly(self) -> None:
         """Weekly internship cold-email batch — Mondays 09:00 ET."""
@@ -520,17 +565,20 @@ class SchedulerService:
             self._schedules["apply-weekly"] = "0 9 * * mon America/New_York"
             print("[scheduler] Registered default: apply-weekly @ Mon 9am ET")
         except Exception as e:
-            print(f"[scheduler] Failed to register apply-weekly: {e}")
+            print(f"{log_ts()} [scheduler] Failed to register apply-weekly: {e}")
 
     async def _run_operator(self, phase: str) -> None:
         """Run a daily-operator phase (morning/midday/eod). Proposes via Cards;
         never writes the calendar."""
+        from pipeline_status import record_pipeline_run
         try:
             from daily_operator import run_phase
             await run_phase(phase)
-            print(f"[scheduler] operator {phase} ran")
+            print(f"{log_ts()} [scheduler] operator {phase} ran")
+            record_pipeline_run(f"operator-{phase}", True)
         except Exception as e:
-            print(f"[scheduler] operator {phase} error: {e}")
+            print(f"{log_ts()} [scheduler] operator {phase} error: {e}")
+            record_pipeline_run(f"operator-{phase}", False, str(e))
 
     def register_operator(self) -> None:
         """Register the daily operator: midday 13:00, eod 18:00 ET.
@@ -557,9 +605,9 @@ class SchedulerService:
                     id=job_id, replace_existing=True,
                 )
                 self._schedules[job_id] = f"15 {hour} * * * America/New_York"
-                print(f"[scheduler] Registered default: operator-{phase} @ {hour}:15 ET")
+                print(f"{log_ts()} [scheduler] Registered default: operator-{phase} @ {hour}:15 ET")
             except Exception as e:
-                print(f"[scheduler] Failed to register operator-{phase}: {e}")
+                print(f"{log_ts()} [scheduler] Failed to register operator-{phase}: {e}")
 
     async def _run_agent(self, agent_id: str) -> None:
         """Execute an agent's scheduled run with full Job/AgentRun persistence."""
@@ -706,7 +754,7 @@ class SchedulerService:
                             status="completed",
                         )
                     except Exception as e:
-                        print(f"[scheduler] Failed to save run output file: {e}")
+                        print(f"{log_ts()} [scheduler] Failed to save run output file: {e}")
 
 
 # Global singleton

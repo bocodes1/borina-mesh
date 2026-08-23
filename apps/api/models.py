@@ -64,6 +64,18 @@ class AgentConfig(SQLModel, table=True):
     last_run_at: Optional[datetime] = None
 
 
+class PipelineRun(SQLModel, table=True):
+    """Last-run tracking for the dedicated cron pipelines (schedule-daily,
+    planner, operator-midday, operator-eod, operator-eod-learner) — see
+    pipeline_status.py. Deliberately a separate table from AgentConfig: these
+    pipeline ids aren't all real routable agents, and a row here would leak
+    into fleet_roster.list_roster()'s /fleet display if stored on AgentConfig."""
+    pipeline_id: str = Field(primary_key=True)
+    last_run_at: Optional[datetime] = None
+    last_run_ok: Optional[bool] = None
+    last_run_detail: Optional[str] = None
+
+
 # Allowed task tags (spec §5.3) — validated at the route layer.
 TASK_TAGS = ("work", "borina", "trading", "personal")
 TASK_PRIORITIES = ("low", "medium", "high")

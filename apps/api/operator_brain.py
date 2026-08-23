@@ -13,6 +13,8 @@ from datetime import date
 from pathlib import Path
 from typing import Optional
 
+from logutil import log_ts
+
 _PROFILE_FILE = ("04-resources", "brain", "operator-profile.md")
 _SECTIONS = (
     "## Active threads",
@@ -175,7 +177,7 @@ async def _call_agent(prompt: str) -> str:
     """Run the learner prompt through the planner agent (chief-of-staff persona).
     Returns the agent's text output ("" on failure)."""
     from agents.runner_v2 import run_agent_task
-    result = await run_agent_task("planner", prompt)
+    result = await run_agent_task("operator", prompt)
     return getattr(result, "output", None) or ""
 
 
@@ -194,10 +196,13 @@ async def update_profile(day: Optional[str] = None) -> dict:
         prompt = f"{prompt}\n\nCONTEXT:\n{pack.text}"
         candidate = await _call_agent(prompt)
     except Exception as exc:  # noqa: BLE001
-        print(f"[operator_brain] learner failed: {exc}")
+        print(f"{log_ts()} [operator_brain] learner failed: {exc}")
         candidate = ""
 
     written = bool(_is_valid_profile(candidate) and write_profile(candidate))
+    if not written:
+        print(f"{log_ts()} [operator_brain] learner produced invalid/empty profile "
+              f"({len(candidate)} chars) — kept prior")
 
     from conversation_log import trim_older_than
     trimmed = trim_older_than(30)
