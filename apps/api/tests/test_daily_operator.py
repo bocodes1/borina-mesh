@@ -76,6 +76,31 @@ def test_approve_item_dispatches_move(monkeypatch):
 
 # ── operator phases ──────────────────────────────────────────────────────────
 @pytest.mark.asyncio
+async def test_midday_offers_approve_buttons_when_calendar_pending(monkeypatch):
+    """Phase E1: the midday Card gets inline approve/skip buttons when there's
+    a proposed calendar item — not just a text recap Bo has to act on via /daily."""
+    import daily_operator as op
+    import planner
+    monkeypatch.setattr(op, "_chat_id", lambda: None)
+    monkeypatch.setattr(planner, "get_plan", lambda day=None: {"items": [
+        {"title": "Focus block", "kind": "calendar", "status": "proposed"},
+    ]})
+    card = await op.run_phase("midday", day="2026-06-18", send=False)
+    labels = {a.label for a in card.actions}
+    assert "Approve all calendar" in labels and "Skip all calendar" in labels
+
+
+@pytest.mark.asyncio
+async def test_midday_no_buttons_when_nothing_pending(monkeypatch):
+    import daily_operator as op
+    import planner
+    monkeypatch.setattr(op, "_chat_id", lambda: None)
+    monkeypatch.setattr(planner, "get_plan", lambda day=None: {"items": []})
+    card = await op.run_phase("midday", day="2026-06-18", send=False)
+    assert card.actions == []
+
+
+@pytest.mark.asyncio
 async def test_morning_phase_removed_no_longer_regenerates_plan(monkeypatch):
     """§A3: the operator-morning phase was deleted because it byte-for-byte
     duplicated the 6:30 planner brief. run_phase('morning') must NOT regenerate
@@ -201,9 +226,11 @@ async def test_eod_phase_survives_learner_error(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_morning_brief_now_lives_in_planner_cron(monkeypatch):
-    """§A3: the single morning brief that sends the Telegram digest is the 6:30
+    """§A3: the single morning brief that sends Telegram content is the 6:30
     planner cron (scheduler._run_planner), not the operator. Verify that path
-    still proposes + sends WITHOUT any autonomous calendar write."""
+    still proposes + sends WITHOUT any autonomous calendar write, and that the
+    real brief/threads narrative (not just a digest count) goes out — Phase B:
+    plan_narrative_text replaces the old static plan_digest_text send."""
     import planner
     from dispatch import dispatcher
     from integrations import google_calendar
@@ -214,15 +241,21 @@ async def test_morning_brief_now_lives_in_planner_cron(monkeypatch):
                         lambda event, **k: writes.append(event) or ok("google_calendar", {"id": "x"}))
     sent = []
     monkeypatch.setattr(dispatcher, "send_telegram_message",
-                        lambda chat, text, **k: sent.append(text) or 1)
+                        lambda chat, text, **k: sent.append((text, k)) or 1)
     monkeypatch.setenv("TELEGRAM_CHAT_ID", "123")
 
     async def fake_gen(day=None):
-        return {"source": "agent", "task_count": 1, "calendar_count": 1}
+        return {"source": "agent", "task_count": 1, "calendar_count": 1,
+                "day": "2026-06-18", "brief": "Ship the learner today.", "threads": []}
     monkeypatch.setattr(planner, "generate_plan_with_agent", fake_gen)
-    monkeypatch.setattr(planner, "plan_digest_text", lambda: "Morning plan ready.")
 
     from scheduler import SchedulerService
     await SchedulerService()._run_planner()
-    assert any("Morning plan ready." in t for t in sent)  # digest sent
+    texts = [t for t, _ in sent]
+    assert any("Ship the learner today." in t for t in texts)  # real narrative sent
+    # a follow-up Card with inline approve/skip buttons for the calendar items
+    markups = [k.get("reply_markup") for _, k in sent if k.get("reply_markup")]
+    assert markups, "expected a Card with buttons for the proposed calendar item"
+    labels = {btn["text"] for row in markups[0]["inline_keyboard"] for btn in row}
+    assert "Approve all calendar" in labels
     assert writes == []  # propose-only — no autonomous calendar write

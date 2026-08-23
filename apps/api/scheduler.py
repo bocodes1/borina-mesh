@@ -327,11 +327,14 @@ class SchedulerService:
             print(f"{log_ts()} [scheduler] Failed to register schedule_daily: {e}")
 
     async def _run_planner(self) -> None:
-        """Generate the daily plan proposal (NEVER writes the calendar) + send a
-        terse Telegram digest. Approval happens later via /daily or Telegram."""
+        """Generate the daily plan proposal (NEVER writes the calendar), send the
+        full brief/threads narrative (not just a digest count), and — when there
+        are proposed calendar items — a follow-up Card with inline approve/skip
+        buttons so the day can be committed from Telegram without opening
+        /daily. Per-item review still works via /daily or `op:edit:{id}`."""
         from pipeline_status import record_pipeline_run
         try:
-            from planner import generate_plan_with_agent, plan_digest_text
+            from planner import generate_plan_with_agent, plan_narrative_text
             summary = await generate_plan_with_agent()
             print(f"{log_ts()} [scheduler] planner ({summary['source']}) proposed {summary['task_count']} tasks + {summary['calendar_count']} changes")
             import os
@@ -339,7 +342,20 @@ class SchedulerService:
             if chat:
                 from dispatch import dispatcher
                 from dispatch.telegram_format import format_telegram
-                dispatcher.send_telegram_message(int(chat), format_telegram(plan_digest_text()))
+                dispatcher.send_telegram_message(
+                    int(chat), format_telegram(plan_narrative_text(summary["day"], summary))
+                )
+                if summary.get("calendar_count"):
+                    from dispatch.cards import Card, Action, send_card
+                    day = summary["day"]
+                    send_card(int(chat), Card(
+                        headline=f"Plan for {day}",
+                        lines=[f"{summary['calendar_count']} proposed calendar change(s) above."],
+                        actions=[
+                            Action("Approve all calendar", f"op:approveall:{day}"),
+                            Action("Skip all calendar", f"op:skip:{day}"),
+                        ],
+                    ))
             record_pipeline_run("planner", True,
                                  f"{summary['task_count']} tasks + {summary['calendar_count']} changes")
         except Exception as e:

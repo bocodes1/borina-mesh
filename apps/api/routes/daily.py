@@ -14,8 +14,12 @@ from integrations import weather
 
 router = APIRouter(prefix="/daily", tags=["daily"])
 
-# Sections of the daily brief that the /daily tab consumes.
-DAILY_SECTIONS = ["tldr", "tasks_focus", "nudges", "weather_logistics"]
+# Sections of the daily brief that the /daily tab consumes. calendar/inbox were
+# generated every morning but read by nothing (Phase B3) — verified inbox-triage
+# never sends its own Telegram summary (its scheduled runs only write
+# reports/{day}/inbox-triage.md), so this brief section isn't a duplicate; both
+# are genuinely useful and already paid for, just wire them in.
+DAILY_SECTIONS = ["tldr", "tasks_focus", "nudges", "weather_logistics", "calendar", "inbox"]
 
 
 @router.get("/summary")

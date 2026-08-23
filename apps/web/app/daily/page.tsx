@@ -1,12 +1,14 @@
 "use client";
 
 import { useState } from "react";
-import { CloudSun, Plus, Sparkles, Target, ListChecks, Trash2 } from "lucide-react";
+import Link from "next/link";
+import { CloudSun, Plus, Sparkles, Target, ListChecks, Trash2, CalendarClock, Inbox, FileText } from "lucide-react";
 import { api, type DailySummary, type TaskItem } from "@/lib/api";
 import { useAsync } from "@/lib/use-async";
 import { Navbar } from "@/components/navbar";
 import { TodaysPlan } from "@/components/todays-plan";
 import { PipelineHealthStrip } from "@/components/pipeline-health-strip";
+import { MarkdownOutput } from "@/components/markdown-output";
 import { SectionHeader } from "@/components/ui/section-header";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ErrorState } from "@/components/ui/error-state";
@@ -89,6 +91,8 @@ function DailyBody() {
   const tldr = data.brief?.tldr;
   const focus = data.brief?.tasks_focus;
   const nudges = data.brief?.nudges;
+  const calendar = data.brief?.calendar;
+  const inbox = data.brief?.inbox;
   const tasks = data.open_tasks ?? [];
 
   return (
@@ -112,12 +116,22 @@ function DailyBody() {
           </div>
         </div>
         {tldr ? (
-          <p className="mt-3 whitespace-pre-wrap text-sm text-foreground/80">{tldr}</p>
+          <div className="mt-3">
+            <MarkdownOutput content={tldr} />
+          </div>
         ) : (
           <p className="mt-3 text-sm text-muted-foreground">
             No brief yet today — generate one from the data sources you’ve connected.
           </p>
         )}
+        {data.has_brief ? (
+          <Link
+            href="/daily/brief"
+            className="mt-3 inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"
+          >
+            <FileText className="h-3.5 w-3.5" /> View full brief
+          </Link>
+        ) : null}
         <div className="mt-4 border-t border-border/40 pt-3">
           <PipelineHealthStrip />
         </div>
@@ -168,13 +182,13 @@ function DailyBody() {
           )}
         </section>
 
-        {/* Focus + Agent suggestions */}
+        {/* Focus + Agent suggestions + Calendar + Inbox */}
         <section className="space-y-6">
           <div>
             <SectionHeader title="Focus" icon={<Target className="h-4 w-4" />} description="What matters today" />
             <div className="surface-card rounded-2xl p-4">
               {focus ? (
-                <p className="whitespace-pre-wrap text-sm text-foreground/85">{focus}</p>
+                <MarkdownOutput content={focus} />
               ) : (
                 <p className="text-sm text-muted-foreground">Focus appears once the morning brief runs.</p>
               )}
@@ -184,12 +198,28 @@ function DailyBody() {
             <SectionHeader title="Agent suggestions" icon={<Sparkles className="h-4 w-4" />} description="Nudges from your morning brief" />
             <div className="surface-card rounded-2xl p-4">
               {nudges ? (
-                <p className="whitespace-pre-wrap text-sm text-foreground/85">{nudges}</p>
+                <MarkdownOutput content={nudges} />
               ) : (
                 <p className="text-sm text-muted-foreground">No suggestions yet.</p>
               )}
             </div>
           </div>
+          {calendar ? (
+            <div>
+              <SectionHeader title="Calendar" icon={<CalendarClock className="h-4 w-4" />} description="Today's events, from the brief" />
+              <div className="surface-card rounded-2xl p-4">
+                <MarkdownOutput content={calendar} />
+              </div>
+            </div>
+          ) : null}
+          {inbox ? (
+            <div>
+              <SectionHeader title="Inbox" icon={<Inbox className="h-4 w-4" />} description="What needs a reply" />
+              <div className="surface-card rounded-2xl p-4">
+                <MarkdownOutput content={inbox} />
+              </div>
+            </div>
+          ) : null}
         </section>
       </div>
     </div>

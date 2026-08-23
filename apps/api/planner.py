@@ -19,6 +19,7 @@ from typing import Optional
 from sqlmodel import select
 
 from db import session_scope
+from dispatch.telegram_format import truncate_plain
 from models import PlanItem, Task
 
 
@@ -233,10 +234,11 @@ def _parse_agent_plan(text: str) -> Optional[dict]:
         if isinstance(t, dict) and (t.get("name") or t.get("today")):
             threads.append({
                 "name": str(t.get("name") or "")[:80],
-                "today": str(t.get("today") or "")[:160],
-                "why": str(t.get("why") or "")[:160],
+                "today": truncate_plain(str(t.get("today") or ""), 160),
+                "why": truncate_plain(str(t.get("why") or ""), 160),
             })
-    return {"brief": str(raw.get("brief") or "")[:600], "threads": threads, "items": items}
+    brief = truncate_plain(str(raw.get("brief") or ""), 600)
+    return {"brief": brief, "threads": threads, "items": items}
 
 
 async def _run_agent_plan(day: str) -> Optional[dict]:
@@ -497,16 +499,6 @@ def reject_item(item_id: int) -> dict:
         return {"status": item.status}
 
 
-def plan_digest_text(day: Optional[str] = None) -> str:
-    """Terse morning digest for Telegram (run through the §1 formatter by caller)."""
-    plan = get_plan(day)
-    proposed = [i for i in plan["items"] if i["status"] == "proposed"]
-    n_task = sum(1 for i in proposed if i["kind"] == "task")
-    n_cal = sum(1 for i in proposed if i["kind"] == "calendar")
-    host = os.getenv("MESH_PUBLIC_HOST", "").strip() or "localhost:3000"
-    return f"Plan ready: {n_task} tasks, {n_cal} proposed calendar changes. Approve in /daily. http://{host}/daily"
-
-
 def plan_narrative_text(day: str, summary: dict) -> str:
     """The morning Telegram narrative: brief → threads → agenda. Trimmed for chat;
     the full layered document lives in daily-plan.md."""
@@ -525,4 +517,6 @@ def plan_narrative_text(day: str, summary: dict) -> str:
         lines += ["", "Agenda:"]
         for c in cals[:10]:
             lines.append(f"• {c['title']}")
+    host = os.getenv("MESH_PUBLIC_HOST", "").strip() or "localhost:3000"
+    lines += ["", f"Review + approve: http://{host}/daily"]
     return "\n".join(lines)

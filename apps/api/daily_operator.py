@@ -34,7 +34,7 @@ async def run_phase(phase: str, day: Optional[str] = None, *, send: bool = True)
     planner brief (both called generate_plan_with_agent). The single morning
     brief now lives in scheduler.register_planner. Only midday/eod remain here."""
     from planner import today_str, get_plan
-    from dispatch.cards import Card, send_card
+    from dispatch.cards import Card, Action, send_card
 
     day = day or today_str()
     chat = _chat_id()
@@ -42,13 +42,19 @@ async def run_phase(phase: str, day: Optional[str] = None, *, send: bool = True)
     if phase == "midday":
         plan = get_plan(day)
         pending = [i["title"] for i in plan.get("items", []) if i.get("status") == "proposed"]
+        pending_cal = [i for i in plan.get("items", [])
+                       if i.get("kind") == "calendar" and i.get("status") == "proposed"]
         lines = ["Midday check."]
         if pending:
             lines.append(f"{len(pending)} item(s) still awaiting your tap:")
             lines += pending[:6]
         else:
             lines.append("All proposed items handled — nice.")
-        card = Card(headline=f"Midday — {day}", lines=lines)
+        actions = [
+            Action("Approve all calendar", f"op:approveall:{day}"),
+            Action("Skip all calendar", f"op:skip:{day}"),
+        ] if pending_cal else []
+        card = Card(headline=f"Midday — {day}", lines=lines, actions=actions)
 
     elif phase == "eod":
         plan = get_plan(day)
