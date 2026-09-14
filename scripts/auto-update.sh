@@ -27,14 +27,19 @@ log() { echo "$(date '+%F %T') $*" >> "$LOG"; }
 
 cd "$REPO_DIR" || { log "ERR cannot cd $REPO_DIR"; exit 1; }
 
+# Only deploy a main checkout. A feature branch (or unpushed main commits) differs
+# from origin/main without being a new release — treating it as one rebuilt and
+# restarted api+web every cycle.
+[ "$(git rev-parse --abbrev-ref HEAD)" = "main" ] || exit 0  # silent
+
 # Fetch quietly
 git fetch origin main --quiet 2>>"$LOG" || { log "ERR git fetch failed"; exit 1; }
 
 LOCAL=$(git rev-parse HEAD)
 REMOTE=$(git rev-parse origin/main)
 
-if [ "$LOCAL" = "$REMOTE" ]; then
-    exit 0  # nothing to do, silent
+if git merge-base --is-ancestor "$REMOTE" "$LOCAL"; then
+    exit 0  # origin/main has nothing we lack, silent
 fi
 
 log "NEW COMMIT detected: $LOCAL -> $REMOTE"
