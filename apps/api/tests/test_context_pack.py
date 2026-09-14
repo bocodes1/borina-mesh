@@ -1,4 +1,21 @@
-from agents.context_pack import build_context_pack, ContextPack
+from agents.context_pack import build_context_pack, ContextPack, adaptive_query
+
+
+def test_adaptive_query_appends_titles():
+    q = adaptive_query("daily plan", ["Ship the learner", "Renew passport"], ["Standup"])
+    assert q.startswith("daily plan ")
+    assert "Ship the learner" in q and "Renew passport" in q and "Standup" in q
+
+
+def test_adaptive_query_dedupes_and_caps():
+    q = adaptive_query("prefix", ["A", "B", "A"], ["C", "D", "E"], limit=3)
+    terms = q.split(" ", 1)[1].split(" ")
+    assert terms == ["A", "B", "C"]  # dedup'd, capped at limit, in order
+
+
+def test_adaptive_query_falls_back_to_bare_prefix_when_nothing_to_add():
+    assert adaptive_query("operator profile day recap") == "operator profile day recap"
+    assert adaptive_query("operator profile day recap", [], None) == "operator profile day recap"
 
 
 def test_pack_includes_data_and_last_artifact_and_is_stable(monkeypatch):

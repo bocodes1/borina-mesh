@@ -13,6 +13,8 @@ from __future__ import annotations
 import os
 from typing import Optional
 
+from logutil import log_ts
+
 PHASES = ("midday", "eod")
 
 
@@ -32,7 +34,7 @@ async def run_phase(phase: str, day: Optional[str] = None, *, send: bool = True)
     planner brief (both called generate_plan_with_agent). The single morning
     brief now lives in scheduler.register_planner. Only midday/eod remain here."""
     from planner import today_str, get_plan
-    from dispatch.cards import Card, send_card
+    from dispatch.cards import Card, Action, send_card
 
     day = day or today_str()
     chat = _chat_id()
@@ -40,13 +42,19 @@ async def run_phase(phase: str, day: Optional[str] = None, *, send: bool = True)
     if phase == "midday":
         plan = get_plan(day)
         pending = [i["title"] for i in plan.get("items", []) if i.get("status") == "proposed"]
+        pending_cal = [i for i in plan.get("items", [])
+                       if i.get("kind") == "calendar" and i.get("status") == "proposed"]
         lines = ["Midday check."]
         if pending:
             lines.append(f"{len(pending)} item(s) still awaiting your tap:")
             lines += pending[:6]
         else:
             lines.append("All proposed items handled — nice.")
-        card = Card(headline=f"Midday — {day}", lines=lines)
+        actions = [
+            Action("Approve all calendar", f"op:approveall:{day}"),
+            Action("Skip all calendar", f"op:skip:{day}"),
+        ] if pending_cal else []
+        card = Card(headline=f"Midday — {day}", lines=lines, actions=actions)
 
     elif phase == "eod":
         plan = get_plan(day)
@@ -56,15 +64,21 @@ async def run_phase(phase: str, day: Optional[str] = None, *, send: bool = True)
         pending = sum(1 for i in items if i.get("status") == "proposed")
         # Nightly learner: refresh Bo's durable profile from today's signals.
         # Best-effort — a learner failure must never break the recap.
+        from pipeline_status import record_pipeline_run
         learn_line = "Profile unchanged."
         try:
             from operator_brain import update_profile
             res = await update_profile(day)
             if res.get("written"):
                 learn_line = f"Profile updated — {res.get('active_threads', 0)} active thread(s)."
+                record_pipeline_run("operator-eod-learner", True, learn_line)
+            else:
+                learn_line = "Profile update skipped — learner returned invalid/empty output."
+                record_pipeline_run("operator-eod-learner", False, learn_line)
         except Exception as e:  # noqa: BLE001
             learn_line = "Profile update skipped (learner error)."
-            print(f"[operator] eod learner error: {e}")
+            print(f"{log_ts()} [operator] eod learner error: {e}")
+            record_pipeline_run("operator-eod-learner", False, str(e))
         card = Card(
             headline=f"EOD recap — {day}",
             lines=[

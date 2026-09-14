@@ -2,12 +2,13 @@
 
 import { useState } from "react";
 import { motion } from "framer-motion";
-import { Check, X, CalendarPlus, ListChecks, Sparkles } from "lucide-react";
+import { Check, X, CalendarPlus, ListChecks, Sparkles, FileText } from "lucide-react";
 import { api, type DailyPlan, type PlanItem } from "@/lib/api";
 import { useAsync } from "@/lib/use-async";
 import { SectionHeader } from "@/components/ui/section-header";
 import { SkeletonCard } from "@/components/ui/loading-skeleton";
 import { ErrorState } from "@/components/ui/error-state";
+import { MarkdownOutput } from "@/components/markdown-output";
 import { cn } from "@/lib/utils";
 
 function ItemRow({ item, onAct }: { item: PlanItem; onAct: (id: number, action: "approve" | "reject") => Promise<void> }) {
@@ -61,6 +62,7 @@ function ItemRow({ item, onAct }: { item: PlanItem; onAct: (id: number, action: 
 export function TodaysPlan() {
   const { data, loading, error, reload } = useAsync<DailyPlan>(() => api.getDailyPlan(), []);
   const [generating, setGenerating] = useState(false);
+  const [showFull, setShowFull] = useState(false);
 
   async function act(id: number, action: "approve" | "reject") {
     if (action === "approve") await api.approvePlanItem(id);
@@ -91,28 +93,45 @@ export function TodaysPlan() {
         description="proposed by the planner — approve to commit"
         icon={<Sparkles className="h-4 w-4" />}
         actions={
-          <button onClick={generate} disabled={generating} className="rounded-lg border border-border bg-surface-2 px-2.5 py-1 font-mono text-xs text-brand hover:bg-surface disabled:opacity-50">
-            {generating ? "…" : data?.has_plan ? "regenerate" : "generate"}
-          </button>
+          <div className="flex items-center gap-2">
+            {data?.raw ? (
+              <button
+                onClick={() => setShowFull((v) => !v)}
+                className="flex items-center gap-1 rounded-lg border border-border bg-surface-2 px-2.5 py-1 font-mono text-xs text-muted-foreground hover:bg-surface"
+              >
+                <FileText className="h-3 w-3" /> {showFull ? "hide" : "full plan"}
+              </button>
+            ) : null}
+            <button onClick={generate} disabled={generating} className="rounded-lg border border-border bg-surface-2 px-2.5 py-1 font-mono text-xs text-brand hover:bg-surface disabled:opacity-50">
+              {generating ? "…" : data?.has_plan ? "regenerate" : "generate"}
+            </button>
+          </div>
         }
       />
       {!data?.has_plan ? (
         <p className="text-sm text-muted-foreground">No plan yet — generate one (or it runs each morning). The planner proposes; nothing is written until you approve.</p>
       ) : (
-        <div className="grid gap-4 md:grid-cols-2">
-          <div>
-            <p className="mb-1.5 font-mono text-[10px] uppercase tracking-wide text-muted-foreground">tasks</p>
-            <div className="space-y-1.5">
-              {tasks.length ? tasks.map((i) => <ItemRow key={i.id} item={i} onAct={act} />) : <p className="text-xs text-muted-foreground">—</p>}
+        <>
+          {showFull && data?.raw ? (
+            <div className="mb-4 rounded-xl border border-border/40 bg-surface p-4">
+              <MarkdownOutput content={data.raw} />
+            </div>
+          ) : null}
+          <div className="grid gap-4 md:grid-cols-2">
+            <div>
+              <p className="mb-1.5 font-mono text-[10px] uppercase tracking-wide text-muted-foreground">tasks</p>
+              <div className="space-y-1.5">
+                {tasks.length ? tasks.map((i) => <ItemRow key={i.id} item={i} onAct={act} />) : <p className="text-xs text-muted-foreground">—</p>}
+              </div>
+            </div>
+            <div>
+              <p className="mb-1.5 font-mono text-[10px] uppercase tracking-wide text-muted-foreground">proposed calendar changes</p>
+              <div className="space-y-1.5">
+                {calendar.length ? calendar.map((i) => <ItemRow key={i.id} item={i} onAct={act} />) : <p className="text-xs text-muted-foreground">—</p>}
+              </div>
             </div>
           </div>
-          <div>
-            <p className="mb-1.5 font-mono text-[10px] uppercase tracking-wide text-muted-foreground">proposed calendar changes</p>
-            <div className="space-y-1.5">
-              {calendar.length ? calendar.map((i) => <ItemRow key={i.id} item={i} onAct={act} />) : <p className="text-xs text-muted-foreground">—</p>}
-            </div>
-          </div>
-        </div>
+        </>
       )}
     </div>
   );

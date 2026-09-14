@@ -19,6 +19,7 @@ from typing import Optional
 from sqlmodel import select
 
 from db import session_scope
+from dispatch.telegram_format import truncate_plain
 from models import PlanItem, Task
 
 
@@ -126,12 +127,9 @@ You never write to the calendar or task list — you only propose; Bo approves e
 Bo's durable profile (what he's working on + how he likes his days):
 {profile}
 
-Today's context:
-- Calendar events: {events}
-- Open tasks: {tasks}
-- Brief TL;DR: {tldr}
-- Brief focus suggestions: {tasks_focus}
-- Recent Obsidian daily notes (prefer FRESH items; SKIP long-running recurring ones): {obsidian}
+Today's context (calendar events, open tasks, brief tl;dr + focus, recent Obsidian
+daily notes — prefer FRESH items, SKIP long-running recurring ones) is below, under
+CONTEXT.
 
 Produce a LAYERED plan. Output ONLY a JSON object (no prose, no code fences):
 {{
@@ -148,7 +146,7 @@ The kind=calendar items ARE Bo's time-blocked agenda: lay out the working day as
 calendar blocks — a 15-min prep buffer before each real meeting, protected
 deep-work block(s), and a timed slot for each top task — with real start/end times
 that don't overlap existing events. At most 10 items total. Ground everything in
-the profile + context above; no generic filler.
+the profile + context; no generic filler.
 
 ALSO save this exact JSON object to plan/{day}.json under your working directory
 (create the folder if needed) — that file is the canonical handoff.
@@ -233,19 +231,28 @@ def _parse_agent_plan(text: str) -> Optional[dict]:
         if isinstance(t, dict) and (t.get("name") or t.get("today")):
             threads.append({
                 "name": str(t.get("name") or "")[:80],
-                "today": str(t.get("today") or "")[:160],
-                "why": str(t.get("why") or "")[:160],
+                "today": truncate_plain(str(t.get("today") or ""), 160),
+                "why": truncate_plain(str(t.get("why") or ""), 160),
             })
-    return {"brief": str(raw.get("brief") or "")[:600], "threads": threads, "items": items}
+    brief = truncate_plain(str(raw.get("brief") or ""), 600)
+    return {"brief": brief, "threads": threads, "items": items}
 
 
 async def _run_agent_plan(day: str) -> Optional[dict]:
     try:
-        from agents.context_pack import build_context_pack
+        from agents.context_pack import build_context_pack, adaptive_query
         from agents.contracts import last_artifact_text
-        prompt = PLANNER_PLAN_PROMPT.format(**_agent_context(day))
-        pack = build_context_pack("planner", query="daily plan calendar tasks",
-                                  data="", last_artifact=last_artifact_text("planner"))
+        ctx = _agent_context(day)
+        prompt = PLANNER_PLAN_PROMPT.format(day=day, profile=ctx["profile"])
+        data = (
+            f"Calendar events: {ctx['events']}\n"
+            f"Open tasks: {ctx['tasks']}\n"
+            f"Brief TL;DR: {ctx['tldr']}\n"
+            f"Brief focus suggestions: {ctx['tasks_focus']}"
+        )
+        query = adaptive_query("daily plan calendar tasks", ctx["task_titles"], ctx["event_titles"])
+        pack = build_context_pack("planner", query=query, data=data,
+                                  last_artifact=last_artifact_text("planner"))
         prompt = f"{prompt}\n\nCONTEXT:\n{pack.text}"
         output = await _call_agent(prompt)
     except Exception as exc:  # noqa: BLE001
@@ -263,26 +270,12 @@ async def _run_agent_plan(day: str) -> Optional[dict]:
     return _parse_agent_plan(output)
 
 
-def _recent_daily_notes(limit: int = 2, max_chars: int = 4000) -> str:
-    """Newest Obsidian daily notes — Bo's actual current work (read-only).
-    Empty-vault/dev/test environments simply get no vault context."""
-    root = os.getenv("OBSIDIAN_VAULT_PATH", "").strip()
-    if not root:
-        return ""
-    daily_dir = Path(root) / "01-daily"
-    if not daily_dir.is_dir():
-        return ""
-    chunks = []
-    for note in sorted(daily_dir.glob("????-??-??.md"), reverse=True)[:limit]:
-        try:
-            chunks.append(f"### {note.stem}\n{note.read_text()}")
-        except OSError:
-            continue
-    return "\n\n".join(chunks)[:max_chars]
-
-
 def _agent_context(day: str) -> dict:
-    """Read-only context strings for the planner prompt."""
+    """Read-only context strings for the planner prompt + its context pack.
+    Recent Obsidian daily notes used to be read here separately
+    (_recent_daily_notes, removed) as well as via vault_brain.recall() in the
+    context pack — the same 01-daily directory, two readers. recall() alone
+    covers it now (build_context_pack's vault section)."""
     from integrations import google_calendar
     from daily_brief import sections_for
 
@@ -301,8 +294,9 @@ def _agent_context(day: str) -> dict:
         ) if open_tasks else "none",
         "tldr": brief.get("tldr") or "no brief yet",
         "tasks_focus": brief.get("tasks_focus") or "none",
-        "obsidian": _recent_daily_notes() or "no vault notes",
         "profile": _safe_profile(),
+        "event_titles": [e.get("title") for e in events if e.get("title")],
+        "task_titles": [t.title for t in open_tasks],
     }
 
 
@@ -497,16 +491,6 @@ def reject_item(item_id: int) -> dict:
         return {"status": item.status}
 
 
-def plan_digest_text(day: Optional[str] = None) -> str:
-    """Terse morning digest for Telegram (run through the §1 formatter by caller)."""
-    plan = get_plan(day)
-    proposed = [i for i in plan["items"] if i["status"] == "proposed"]
-    n_task = sum(1 for i in proposed if i["kind"] == "task")
-    n_cal = sum(1 for i in proposed if i["kind"] == "calendar")
-    host = os.getenv("MESH_PUBLIC_HOST", "").strip() or "localhost:3000"
-    return f"Plan ready: {n_task} tasks, {n_cal} proposed calendar changes. Approve in /daily. http://{host}/daily"
-
-
 def plan_narrative_text(day: str, summary: dict) -> str:
     """The morning Telegram narrative: brief → threads → agenda. Trimmed for chat;
     the full layered document lives in daily-plan.md."""
@@ -525,4 +509,6 @@ def plan_narrative_text(day: str, summary: dict) -> str:
         lines += ["", "Agenda:"]
         for c in cals[:10]:
             lines.append(f"• {c['title']}")
+    host = os.getenv("MESH_PUBLIC_HOST", "").strip() or "localhost:3000"
+    lines += ["", f"Review + approve: http://{host}/daily"]
     return "\n".join(lines)

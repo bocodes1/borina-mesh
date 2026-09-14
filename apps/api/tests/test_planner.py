@@ -66,6 +66,45 @@ def test_planner_agent_prompt_includes_context_block(monkeypatch, tmp_path):
     assert "CONTEXT:" in captured["prompt"]
 
 
+def test_planner_agent_feeds_live_data_through_context_pack(monkeypatch, tmp_path):
+    """Phase C1: calendar/tasks/brief data reaches the agent via
+    build_context_pack's `data` param (so there's one data-injection path),
+    not baked separately into the prompt template — and the adaptive query
+    (C1/D3) is built from the day's actual open-task titles."""
+    import asyncio
+    import agents.context_pack as CP
+    from agents import runner_v2
+    from db import session_scope
+    from models import Task
+
+    monkeypatch.setenv("REPORTS_DIR", str(tmp_path))
+    with session_scope() as s:
+        s.add(Task(title="Ship the learner fix", tag="borina"))
+        s.commit()
+
+    captured = {}
+
+    def fake_pack(agent_id, *, query, data="", last_artifact=""):
+        captured["query"] = query
+        captured["data"] = data
+        return CP.ContextPack(text="PACKTEXT", signal_hash="x")
+    monkeypatch.setattr(CP, "build_context_pack", fake_pack)
+
+    async def _fake_run(agent_id, prompt, **k):
+        captured["prompt"] = prompt
+
+        class R:
+            output = ""
+        return R()
+    monkeypatch.setattr(runner_v2, "run_agent_task", _fake_run)
+
+    asyncio.run(planner.generate_plan_with_agent(day="2026-06-18"))
+    assert "Ship the learner fix" in captured["data"]  # live task data went through the pack
+    assert "Ship the learner fix" in captured["query"]  # adaptive query uses the same titles
+    assert "PACKTEXT" in captured["prompt"]
+    assert "{events}" not in captured["prompt"] and "{tasks}" not in captured["prompt"]
+
+
 def test_generate_plan_writes_no_calendar(monkeypatch):
     calls = _spy_create_event(monkeypatch)
     summary = planner.generate_plan()

@@ -143,20 +143,9 @@ def test_strip_ui_chrome_drops_response_chrome():
     assert _strip_ui_chrome(text).strip() == "keep me"
 
 
-# ── planner: agent context (obsidian dailies) ───────────────────────────────
-
-def test_planner_context_includes_recent_obsidian_dailies(tmp_path, monkeypatch):
-    daily = tmp_path / "01-daily"
-    daily.mkdir(parents=True)
-    (daily / "2026-06-09.md").write_text("# old\n- [ ] stale thing")
-    (daily / "2026-06-10.md").write_text("# today\n- [ ] ship the poller test")
-    monkeypatch.setenv("OBSIDIAN_VAULT_PATH", str(tmp_path))
-    ctx = planner._agent_context("2026-06-10")
-    assert "ship the poller test" in ctx["obsidian"]
-    assert "stale thing" in ctx["obsidian"]  # included, prompt tells agent to down-weight
-
-
-def test_planner_context_no_vault_is_empty(monkeypatch):
-    monkeypatch.setenv("OBSIDIAN_VAULT_PATH", "")
-    ctx = planner._agent_context("2026-06-10")
-    assert ctx["obsidian"] == "no vault notes"
+# ── planner: agent context ───────────────────────────────────────────────────
+# Recent Obsidian daily notes used to be read directly into _agent_context
+# ("obsidian" key) as well as via vault_brain.recall() in the context pack —
+# the same 01-daily directory, two readers. Consolidated onto recall() alone
+# (Phase C2); coverage of "recent daily notes reach the prompt" now lives in
+# the vault_brain tests + test_planner_layered's context-pack wiring tests.

@@ -176,7 +176,7 @@ def _link_html(deep_link: str, label: str = "open in mesh") -> str:
     return f'<a href="{escape_html(deep_link)}">{escape_html(label)}</a>'
 
 
-def _truncate_plain(text: str, budget: int) -> str:
+def truncate_plain(text: str, budget: int) -> str:
     """Cut plain text on a clean boundary (paragraph > sentence > word), never
     mid-word. Truncation happens BEFORE HTML rendering so no tag is ever split."""
     if len(text) <= budget:
@@ -207,7 +207,7 @@ def format_telegram(raw: str, *, limit: int = MAX_LEN, max_lines: int | None = N
     rendered = cap_lines(rendered, max_lines if max_lines is not None else telegram_max_lines())
     if len(rendered) > limit:
         # Re-truncate on the plain text to keep tags intact.
-        plain = _truncate_plain(normalize_whitespace(strip_emojis(raw)), limit - 40)
+        plain = truncate_plain(normalize_whitespace(strip_emojis(raw)), limit - 40)
         rendered = render_telegram_html(plain)
     return rendered
 
@@ -221,7 +221,7 @@ def format_answer_reply(*, agent: str, markdown: str, deep_link: str = "", limit
     budget = min(limit, SAFE_BUDGET) - (len(link) + 4 if link else 0)
     truncated = len(plain) > budget
     if truncated:
-        plain = _truncate_plain(plain, budget) + _MORE
+        plain = truncate_plain(plain, budget) + _MORE
     body = render_telegram_html(plain)
     # Only the long/truncated case needs a pointer to the rest — a short answer
     # is complete on its own, so no link noise.

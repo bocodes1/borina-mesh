@@ -37,6 +37,7 @@ def init_db() -> None:
             ("agentconfig", "state", "VARCHAR DEFAULT 'active'"),
             ("agentrun", "qa_verdict", "TEXT"),
             ("agentrun", "qa_notes", "TEXT"),
+            ("task", "completed_at", "TIMESTAMP"),
         ]
         for table, col, col_type in migrations:
             try:

@@ -13,6 +13,8 @@ from datetime import date
 from pathlib import Path
 from typing import Optional
 
+from logutil import log_ts
+
 _PROFILE_FILE = ("04-resources", "brain", "operator-profile.md")
 _SECTIONS = (
     "## Active threads",
@@ -112,6 +114,10 @@ def _today_daily_note(day: str) -> str:
 
 
 def _task_signal(day: str) -> dict:
+    """created_today/open — same as before — plus completed_today, now possible
+    because Task.completed_at (Phase D1) actually timestamps the done
+    transition. Before this, a task finished today and one finished three
+    weeks ago both just vanished from "open" with no way to tell them apart."""
     from sqlmodel import select
     from db import session_scope
     from models import Task
@@ -119,7 +125,11 @@ def _task_signal(day: str) -> dict:
         tasks = s.exec(select(Task)).all()
         created_today = [t.title for t in tasks if t.created_at.date().isoformat() == day]
         open_titles = [t.title for t in tasks if not t.done][:20]
-    return {"created_today": created_today, "open": open_titles}
+        completed_today = [
+            t.title for t in tasks
+            if t.done and t.completed_at and t.completed_at.date().isoformat() == day
+        ]
+    return {"created_today": created_today, "open": open_titles, "completed_today": completed_today}
 
 
 def _calendar_signal(day: str) -> list[dict]:
@@ -133,18 +143,23 @@ def _gather_signals(day: str) -> dict:
     from conversation_log import recent_for_day
     convo = recent_for_day(day)
     cal = _calendar_signal(day)  # one calendar call, not two
+    tasks = _task_signal(day)
     return {
         "daily_note": _today_daily_note(day) or "(none)",
         "conversation": json.dumps(convo)[:4000] if convo else "(none)",
-        "tasks": json.dumps(_task_signal(day)),
+        "tasks": json.dumps(tasks),
         "calendar": json.dumps(cal) if cal else "(none)",
+        "task_titles": (tasks.get("open", [])[:5] + tasks.get("created_today", [])[:3]
+                        + tasks.get("completed_today", [])[:3]),
+        "event_titles": [e.get("title") for e in cal if e.get("title")],
     }
 
 
 LEARNER_PROMPT = """<task name="update_operator_profile">
 You maintain a durable PROFILE of Bo — a compressed model of what he is working
 on and how he likes his days. Today is {day}. Update the profile from today's
-signals. Output ONLY the full updated profile markdown (no prose, no code fences).
+signals (daily note, Telegram conversation, tasks, calendar — below under
+CONTEXT). Output ONLY the full updated profile markdown (no prose, no code fences).
 
 Rules:
 - Keep the EXACT section headers, in this order: "# Operator profile — Bo",
@@ -157,17 +172,18 @@ Rules:
   than 7 days into "## Recently completed / closed" as a one-line note.
 - NO invention. Only assert what the signals or the prior profile support. Prefer
   FRESH items from today; do not re-add finished work.
+- The tasks signal's "completed_today" list is real, timestamped completions —
+  not an inference. Use it directly for "## Recently completed / closed" instead
+  of guessing from what dropped out of "open".
+- The Telegram conversation includes entries with role="correction" — Bo
+  explicitly wrote these for you, not ambient chat. Treat them as ground truth
+  that overrides any conflicting inference from other signals or the prior
+  profile.
 
 Prior profile:
 ---
 {profile}
 ---
-
-Today's signals:
-- Daily note: {daily_note}
-- Telegram conversation (role/text JSON): {conversation}
-- Tasks (created_today / open JSON): {tasks}
-- Calendar events JSON: {calendar}
 </task>"""
 
 
@@ -175,7 +191,7 @@ async def _call_agent(prompt: str) -> str:
     """Run the learner prompt through the planner agent (chief-of-staff persona).
     Returns the agent's text output ("" on failure)."""
     from agents.runner_v2 import run_agent_task
-    result = await run_agent_task("planner", prompt)
+    result = await run_agent_task("operator", prompt)
     return getattr(result, "output", None) or ""
 
 
@@ -186,18 +202,30 @@ async def update_profile(day: Optional[str] = None) -> dict:
     day = day or date.today().isoformat()
     current = read_profile()
     try:
-        from agents.context_pack import build_context_pack
+        from agents.context_pack import build_context_pack, adaptive_query
         from agents.contracts import last_artifact_text
-        prompt = LEARNER_PROMPT.format(day=day, profile=current, **_gather_signals(day))
-        pack = build_context_pack("operator", query="operator profile day recap",
-                                  data="", last_artifact=last_artifact_text("operator"))
+        signals = _gather_signals(day)
+        prompt = LEARNER_PROMPT.format(day=day, profile=current)
+        data = (
+            f"Daily note: {signals['daily_note']}\n"
+            f"Telegram conversation (role/text JSON): {signals['conversation']}\n"
+            f"Tasks (created_today / open JSON): {signals['tasks']}\n"
+            f"Calendar events JSON: {signals['calendar']}"
+        )
+        query = adaptive_query("operator profile day recap",
+                                signals["task_titles"], signals["event_titles"])
+        pack = build_context_pack("operator", query=query, data=data,
+                                  last_artifact=last_artifact_text("operator"))
         prompt = f"{prompt}\n\nCONTEXT:\n{pack.text}"
         candidate = await _call_agent(prompt)
     except Exception as exc:  # noqa: BLE001
-        print(f"[operator_brain] learner failed: {exc}")
+        print(f"{log_ts()} [operator_brain] learner failed: {exc}")
         candidate = ""
 
     written = bool(_is_valid_profile(candidate) and write_profile(candidate))
+    if not written:
+        print(f"{log_ts()} [operator_brain] learner produced invalid/empty profile "
+              f"({len(candidate)} chars) — kept prior")
 
     from conversation_log import trim_older_than
     trimmed = trim_older_than(30)

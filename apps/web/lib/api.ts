@@ -100,6 +100,9 @@ export const api = {
   // ── Daily tab ───────────────────────────────────────────────────────────
   getDailySummary: () => fetchJSON<DailySummary>("/daily/summary"),
   getDailyBrief: () => fetchJSON<DailyBriefResponse>("/daily/brief"),
+  getPipelineHealth: () => fetchJSON<PipelineHealthResponse>("/health/pipelines"),
+  addCorrection: (text: string) =>
+    fetchJSON<{ ok: boolean }>("/daily/correction", { method: "POST", body: JSON.stringify({ text }) }),
   generateDailyBrief: (useAgent = false) =>
     fetchJSON<{ written: string; date: string; sections_found: string[] }>(
       `/daily/generate?use_agent=${useAgent}`,
@@ -240,6 +243,7 @@ export interface TaskItem {
   done: boolean;
   sort_order: number;
   created_at: string;
+  completed_at: string | null;
 }
 
 export interface DailySummary {
@@ -255,6 +259,24 @@ export interface DailyBriefResponse {
   exists: boolean;
   raw: string | null;
   sections: Record<string, string>;
+}
+
+export interface PipelineRunStatus {
+  pipeline_id: string;
+  last_run_at: string | null;
+  last_run_ok: boolean | null;
+  last_run_detail: string | null;
+}
+export interface PipelineHealthFinding {
+  kind: string;
+  agent: string;
+  severity: "alert" | "warn" | "info";
+  detail: string;
+}
+export interface PipelineHealthResponse {
+  pipelines: PipelineRunStatus[];
+  findings: PipelineHealthFinding[];
+  max_age_hours: number;
 }
 
 export interface PlanItem {
