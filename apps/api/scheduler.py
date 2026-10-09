@@ -269,6 +269,63 @@ class SchedulerService:
         except Exception as e:
             print(f"{log_ts()} [scheduler] Failed to register deskview-alerts: {e}")
 
+    async def _run_studio_radar(self) -> None:
+        """Launch Studio radar (M5): headless `studio radar` → brief cards, in a detached
+        scripts/studio_radar_run.py so a kickstart during the run never loses its briefs."""
+        try:
+            from dispatch.studio_runner import spawn_radar
+            pid = spawn_radar()
+            print(f"{log_ts()} [scheduler] studio-radar: started pid {pid}")
+        except Exception as e:  # noqa: BLE001
+            print(f"{log_ts()} [scheduler] studio-radar error: {e}")
+
+    def register_studio_radar(self) -> None:
+        """Every STUDIO_RADAR_EVERY_H hours at :07 ET. Off unless STUDIO_ENABLED=1:
+        every run spends Claude usage."""
+        from dispatch.studio_radar import TZ, enabled, every_hours
+        n = every_hours()
+        if not enabled() or n == 0:
+            print("[scheduler] studio-radar off (STUDIO_ENABLED / STUDIO_RADAR_EVERY_H)")
+            return
+        job_id = "studio-radar"
+        if self._scheduler.get_job(job_id):
+            return
+        try:
+            trigger = CronTrigger(hour=f"*/{n}", minute=7, timezone=TZ)
+            self._scheduler.add_job(self._run_studio_radar, trigger=trigger, id=job_id,
+                                    replace_existing=True, max_instances=1, coalesce=True)
+            self._schedules[job_id] = f"7 */{n} * * * America/New_York"
+            print(f"[scheduler] Registered default: studio-radar @ every {n}h")
+        except Exception as e:
+            print(f"{log_ts()} [scheduler] Failed to register studio-radar: {e}")
+
+    async def _run_studio_stops(self) -> None:
+        """Launch Studio stop watcher (M5): NON-LLM, cards each new stop once."""
+        try:
+            from dispatch.studio_stops import watch_stops
+            res = await asyncio.to_thread(watch_stops)
+            if res.get("sent"):
+                print(f"{log_ts()} [scheduler] studio-stops: {res}")
+        except Exception as e:  # noqa: BLE001
+            print(f"{log_ts()} [scheduler] studio-stops error: {e}")
+
+    def register_studio_stops(self) -> None:
+        """Every 2 minutes, only when STUDIO_ENABLED=1. Costs no Claude usage."""
+        from dispatch.studio_radar import enabled
+        if not enabled():
+            print("[scheduler] studio-stops off (STUDIO_ENABLED unset)")
+            return
+        job_id = "studio-stops"
+        if self._scheduler.get_job(job_id):
+            return
+        try:
+            self._scheduler.add_job(self._run_studio_stops, trigger=parse_cron("*/2 * * * *"), id=job_id,
+                                    replace_existing=True, max_instances=1, coalesce=True)
+            self._schedules[job_id] = "*/2 * * * *"
+            print("[scheduler] Registered default: studio-stops (non-LLM) @ */2")
+        except Exception as e:
+            print(f"{log_ts()} [scheduler] Failed to register studio-stops: {e}")
+
     async def _run_digest(self) -> None:
         """Run the wiki daily digest."""
         try:

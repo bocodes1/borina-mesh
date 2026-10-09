@@ -79,6 +79,8 @@ async def lifespan(app: FastAPI):
     scheduler_service.register_defaults()
     scheduler_service.register_trader_health()
     scheduler_service.register_deskview_alerts()
+    scheduler_service.register_studio_radar()
+    scheduler_service.register_studio_stops()
     scheduler_service.register_finance_brief()
     scheduler_service.register_schedule_daily()
     scheduler_service.register_planner()

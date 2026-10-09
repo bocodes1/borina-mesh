@@ -134,7 +134,7 @@ def _fleet_status_text() -> str:
 
 
 # ── slash commands (registered with setMyCommands so they autocomplete) ──────────
-_CMD_RE = re.compile(r"^\s*/(?P<cmd>help|jobs|fleet|cancel|start)\b(?:@\w+)?\s*(?P<arg>.*)$", re.IGNORECASE | re.DOTALL)
+_CMD_RE = re.compile(r"^\s*/(?P<cmd>help|jobs|fleet|cancel|start|studio)\b(?:@\w+)?\s*(?P<arg>.*)$", re.IGNORECASE | re.DOTALL)
 
 COMMANDS = [
     {"command": "help", "description": "What Borina can do + how to talk to it"},
@@ -142,6 +142,7 @@ COMMANDS = [
     {"command": "fleet", "description": "Agent roster and their states"},
     {"command": "cancel", "description": "Cancel a running job: /cancel <id>"},
     {"command": "apply", "description": "Stage internship cold emails: apply: <criteria>"},
+    {"command": "studio", "description": "Launch Studio: projects, stops, radar now"},
 ]
 
 _HELP_TEXT = (
@@ -151,7 +152,9 @@ _HELP_TEXT = (
     "<b>Commands</b>\n"
     "/jobs — running &amp; recent jobs, with cancel buttons\n"
     "/fleet — the agent roster and states\n"
-    "/cancel &lt;id&gt; — stop a running job\n\n"
+    "/cancel &lt;id&gt; — stop a running job\n"
+    "/studio — Launch Studio projects and stops; /studio radar runs one now; "
+    "/studio ca &lt;slug&gt; &lt;CA&gt; takes the token's CA for go-live\n\n"
     "<b>Power use</b>\n"
     "• <code>trader: …</code> — address one agent directly\n"
     "• <code>mission: …</code> — decompose across agents and synthesize\n"
@@ -259,6 +262,16 @@ def _handle_command(cmd: str, arg: str, chat_id: int) -> dict:
             return {"ok": True, "status": "cancel_usage"}
         dispatcher.send_telegram_message(chat_id, format_telegram(_do_cancel(int(m.group()))))
         return {"ok": True, "status": "cancel"}
+    if cmd == "studio":
+        from dispatch import studio
+        if (arg or "").strip().lower() == "radar":
+            studio.start_radar_now(chat_id)
+            return {"ok": True, "status": "studio_radar"}
+        if (arg or "").strip().lower().split()[:1] == ["ca"]:
+            studio.take_ca(chat_id, arg)
+            return {"ok": True, "status": "studio_ca"}
+        studio.send_status(chat_id)
+        return {"ok": True, "status": "studio"}
     return {"ok": True, "status": "unknown_command"}
 
 
@@ -292,6 +305,9 @@ def _handle_callback(data: str, chat_id: int) -> dict:
         return _handle_run_callback(data, chat_id)
     if action == "apply":
         return _handle_apply_callback(data, chat_id)
+    if action == "st":
+        from dispatch import studio
+        return studio.handle_callback(data, chat_id)
     return {"ok": True, "status": "unknown_action"}
 
 
@@ -701,6 +717,16 @@ def process_update(update: dict) -> dict:
             log_message(chat_id, "user", text)
         except Exception:  # noqa: BLE001
             pass
+
+    # 2a. A reply to a Launch Studio stop card is a note for that stop. Checked
+    # before the command regexes, so "Ship, but make the hero darker" is never
+    # read as a mesh "ship:" build.
+    studio_reply_to = (msg.get("reply_to_message") or {}).get("message_id")
+    if studio_reply_to:
+        studio_thread = dispatcher.find_thread(chat_id, studio_reply_to)
+        if studio_thread and studio_thread.agent_id == "studio":
+            from dispatch import studio
+            return studio.handle_reply(studio_thread, text, chat_id)
 
     # 2b1. Builder: "build: X" / "ship: X" — autonomous code change in a
     # detached worktree runner. The generic forbidden gate is deliberately not

@@ -267,3 +267,43 @@ class OutreachReply(SQLModel, table=True):
     confirmed: bool = False                        # Bo has NOT confirmed; never auto-final
     received_at: Optional[str] = None
     created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
+
+
+class StudioToken(SQLModel, table=True):
+    """A Launch Studio button (M5, contracts §9). Telegram caps callback_data at
+    64 bytes, so a button carries `st:<token>` and its action lives here.
+    `used_at` marks it consumed: a double tap or a re-delivered update acts once.
+    kind: build | skip | retry | answer | confirm | cancel."""
+    token: str = Field(primary_key=True)
+    kind: str = Field(index=True)
+    payload_json: str = "{}"
+    slug: Optional[str] = Field(default=None, index=True)
+    stop_id: Optional[str] = Field(default=None, index=True)
+    created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
+    used_at: Optional[datetime] = None
+
+
+class StudioBrief(SQLModel, table=True):
+    """Every radar brief ticker the mesh has carded, so a later radar run never
+    cards the same ticker again. status: sent | building | skipped."""
+    ticker: str = Field(primary_key=True)
+    briefs_file: str
+    brief_id: str
+    name: str
+    big_swing: bool = False
+    status: str = Field(default="sent", index=True)
+    slug: Optional[str] = None
+    created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
+
+
+class StudioStop(SQLModel, table=True):
+    """Every Launch Studio stop the watcher has carded (key "<slug>/<stopId>"),
+    so each stop is carded once. status: sent | answered."""
+    key: str = Field(primary_key=True)
+    slug: str = Field(index=True)
+    stop_id: str
+    title: str = ""
+    cost_usd: Optional[float] = None
+    message_id: Optional[int] = None
+    status: str = Field(default="sent", index=True)
+    created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
