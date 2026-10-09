@@ -99,3 +99,23 @@ def test_spawn_run_detaches(monkeypatch, tmp_path):
 def test_spawn_run_refuses_a_bad_slug(monkeypatch):
     monkeypatch.setattr(subprocess, "Popen", lambda *a, **k: pytest.fail("must not start anything"))
     assert sr.spawn_run("../x") is None
+
+
+def test_spawn_radar_detaches(monkeypatch, tmp_path):
+    monkeypatch.setattr(sr, "REPO", tmp_path)
+    seen = {}
+
+    class FakeProc:
+        pid = 4343
+
+    def fake_popen(args, **kw):
+        seen["args"] = args
+        seen.update(kw)
+        return FakeProc()
+
+    monkeypatch.setattr(subprocess, "Popen", fake_popen)
+    assert sr.spawn_radar(force=True) == 4343
+    assert seen["args"][1].endswith("scripts/studio_radar_run.py") and seen["args"][-1] == "--force"
+    assert seen["start_new_session"] is True and (tmp_path / "logs").is_dir()
+    sr.spawn_radar()
+    assert "--force" not in seen["args"]

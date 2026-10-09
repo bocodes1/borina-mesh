@@ -270,12 +270,12 @@ class SchedulerService:
             print(f"{log_ts()} [scheduler] Failed to register deskview-alerts: {e}")
 
     async def _run_studio_radar(self) -> None:
-        """Launch Studio radar (M5): headless `studio radar` → brief cards. The
-        subprocess runs in a thread so the event loop keeps serving."""
+        """Launch Studio radar (M5): headless `studio radar` → brief cards, in a detached
+        scripts/studio_radar_run.py so a kickstart during the run never loses its briefs."""
         try:
-            from dispatch.studio_radar import run_radar_job
-            res = await asyncio.to_thread(run_radar_job)
-            print(f"{log_ts()} [scheduler] studio-radar: {res}")
+            from dispatch.studio_runner import spawn_radar
+            pid = spawn_radar()
+            print(f"{log_ts()} [scheduler] studio-radar: started pid {pid}")
         except Exception as e:  # noqa: BLE001
             print(f"{log_ts()} [scheduler] studio-radar error: {e}")
 

@@ -170,7 +170,7 @@ def run_radar_job(now: Optional[datetime] = None, force: bool = False) -> dict:
         reason = res.error or ("unreadable briefs file" if rel else "the studio gave no BRIEFS line")
         was_ok = _last_ok()
         record_pipeline_run("studio-radar", False, reason)
-        if was_ok is not False:  # say it once, not every 6 h
+        if force or was_ok is not False:  # say it once, not every 6 h; always when Bo asked
             dispatcher.send_telegram_message(chat, format_telegram(f"Studio radar failed: {reason}"))
         return {"status": "failed", "reason": reason}
 
@@ -197,4 +197,6 @@ def run_radar_job(now: Optional[datetime] = None, force: bool = False) -> dict:
             for b in swings:
                 _remember(b, rel)
     record_pipeline_run("studio-radar", True, f"{sent} new, {len(swings)} swings")
+    if force and not sent and not swings:
+        dispatcher.send_telegram_message(chat, format_telegram("Radar done: no new briefs this time."))
     return {"status": "ok", "sent": sent, "swings": len(swings)}

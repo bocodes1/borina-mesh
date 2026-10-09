@@ -24,18 +24,27 @@ RUN_TIMEOUT_S = 24 * 3600     # backstop only: the studio limits each Claude ses
 DONE_STAGES = ("live", "dropped")
 
 
+def _detach(script: str, args: list[str], log_name: str) -> int:
+    py = REPO / "apps" / "api" / ".venv" / "bin" / "python"
+    log = REPO / "logs" / log_name
+    log.parent.mkdir(parents=True, exist_ok=True)
+    with log.open("ab") as fh:
+        proc = subprocess.Popen([str(py), str(REPO / "scripts" / script), *args], stdout=fh, stderr=fh,
+                                start_new_session=True, cwd=str(REPO))
+    return proc.pid
+
+
 def spawn_run(slug: str) -> Optional[int]:
     """Start the detached runner for one project. Returns its pid, or None for a bad slug."""
     if not studio_client.SLUG_RE.match(slug or ""):
         return None
-    py = REPO / "apps" / "api" / ".venv" / "bin" / "python"
-    script = REPO / "scripts" / "studio_run.py"
-    log = REPO / "logs" / f"studio-{slug}.log"
-    log.parent.mkdir(parents=True, exist_ok=True)
-    with log.open("ab") as fh:
-        proc = subprocess.Popen([str(py), str(script), "--slug", slug], stdout=fh, stderr=fh,
-                                start_new_session=True, cwd=str(REPO))
-    return proc.pid
+    return _detach("studio_run.py", ["--slug", slug], f"studio-{slug}.log")
+
+
+def spawn_radar(force: bool = False) -> int:
+    """Start one detached radar job. A radar session runs ~40 min; held inside the API, a
+    kickstart in that window would orphan the studio child and nobody would card its briefs."""
+    return _detach("studio_radar_run.py", ["--force"] if force else [], "studio-radar.log")
 
 
 def outcome(res: studio_client.StudioResult, slug: str) -> tuple[str, str]:

@@ -38,18 +38,15 @@ def test_studio_when_the_cli_is_down(env):
 
 
 def test_studio_radar_runs_one_now(env, monkeypatch):
-    forced = []
-    monkeypatch.setattr(studio_radar, "run_radar_job", lambda now=None, force=False: forced.append(force) or {"status": "ok"})
-    monkeypatch.setattr(studio, "_start", lambda target: target())
+    monkeypatch.setattr(studio_radar, "run_radar_job", lambda *a, **k: pytest.fail("the API must not hold the radar"))
     assert _cmd("/studio radar")["status"] == "studio_radar"
-    assert forced == [True] and "Radar started" in env.sent[0]["text"]
+    assert env.radars == [True] and "Radar started" in env.sent[0]["text"]
 
 
 def test_studio_radar_says_when_the_studio_is_off(env, monkeypatch):
     monkeypatch.setenv("STUDIO_ENABLED", "")
-    monkeypatch.setattr(studio, "_start", lambda target: pytest.fail("must not start a radar"))
     _cmd("/studio radar")
-    assert "STUDIO_ENABLED" in env.sent[-1]["text"]
+    assert env.radars == [] and "STUDIO_ENABLED" in env.sent[-1]["text"]
 
 
 def test_studio_is_in_the_command_menu_and_the_help():

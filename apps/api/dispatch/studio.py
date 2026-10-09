@@ -222,7 +222,7 @@ def start_radar_now(chat_id: int) -> None:
         _say(chat_id, "Launch Studio is off: set STUDIO_ENABLED=1 in the mesh's .env.")
         return
     _say(chat_id, "Radar started. New briefs arrive here in about 30 to 40 minutes.")
-    _start(lambda: studio_radar.run_radar_job(force=True))
+    studio_runner.spawn_radar(force=True)
 
 
 GOLIVE_TIMEOUT_S = 600  # go-live checks the mint on chain and waits for the site's health

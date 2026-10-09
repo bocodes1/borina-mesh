@@ -113,3 +113,29 @@ def test_register_studio_radar_follows_the_settings(monkeypatch):
     off = SchedulerService()
     off.register_studio_radar()
     assert "studio-radar" not in off.list_schedules()
+
+
+def test_the_scheduled_radar_runs_detached(monkeypatch):
+    import asyncio
+
+    from dispatch import studio_runner
+    from scheduler import SchedulerService
+
+    started = []
+    monkeypatch.setattr(studio_runner, "spawn_radar", lambda force=False: started.append(force) or 1)
+    monkeypatch.setattr(studio_radar, "run_radar_job", lambda *a, **k: pytest.fail("the API must not hold the radar"))
+    asyncio.run(SchedulerService()._run_studio_radar())
+    assert started == [False]
+
+
+def test_a_radar_bo_asked_for_always_reports_its_outcome(studio):
+    studio.cli.reply("radar", 1, "FAIL egress port 18788 is busy (an interactive radar may be running)\n")
+    studio_radar.run_radar_job(now=NOON)
+    studio_radar.run_radar_job(now=NOON, force=True)
+    assert len(studio.sent) == 2
+    studio.write(brief(1, "SAMPLE", "Sample Desk"))
+    studio.cli.reply("radar", 0, f"BRIEFS {REL}\n")
+    studio_radar.run_radar_job(now=NOON)
+    n = len(studio.sent)
+    studio_radar.run_radar_job(now=NOON, force=True)
+    assert len(studio.sent) == n + 1 and "no new briefs" in studio.sent[-1]["text"]
