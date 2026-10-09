@@ -76,7 +76,7 @@ def clean_tables() -> None:
         for model in (StudioToken, StudioBrief, StudioStop):
             s.exec(delete(model))
         s.exec(delete(TelegramThread).where(col(TelegramThread.agent_id) == "studio"))
-        s.exec(delete(PipelineRun).where(col(PipelineRun.pipeline_id) == "studio-radar"))
+        s.exec(delete(PipelineRun).where(col(PipelineRun.pipeline_id).in_(["studio-radar", "studio-stops"])))
         s.commit()
 
 

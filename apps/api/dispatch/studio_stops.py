@@ -64,6 +64,28 @@ def send_stop(chat_id: int, st: dict) -> Optional[int]:
     return mid
 
 
+def _say_health(chat_id: int, ok: bool) -> None:
+    """A studio run that stops is silent because this watcher cards the stop, so a
+    watcher that can't read stops must say so: once when it breaks, once when it recovers."""
+    from db import session_scope
+    from dispatch.telegram_format import format_telegram
+    from models import PipelineRun
+    from pipeline_status import record_pipeline_run
+
+    with session_scope() as s:
+        row = s.get(PipelineRun, "studio-stops")
+        was = None if row is None else row.last_run_ok
+    if was is ok:
+        return
+    record_pipeline_run("studio-stops", ok, "" if ok else "studio stops --pending failed")
+    if not ok:
+        dispatcher.send_telegram_message(chat_id, format_telegram(
+            "Studio stop watcher can't read the studio's stops (studio stops --pending failed), "
+            "so new stops won't reach Telegram until it works again. Details are in the mesh log."))
+    elif was is False:
+        dispatcher.send_telegram_message(chat_id, format_telegram("Studio stop watcher is working again."))
+
+
 def watch_stops() -> dict:
     from db import session_scope
     from dispatch.studio_radar import enabled
@@ -75,6 +97,7 @@ def watch_stops() -> dict:
     if chat is None:
         return {"status": "no_chat"}
     stops = studio_client.pending_stops()
+    _say_health(chat, stops is not None)
     if stops is None:
         return {"status": "cli_error"}
     sent = 0

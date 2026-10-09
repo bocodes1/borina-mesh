@@ -136,6 +136,17 @@ def test_an_answer_made_elsewhere_retires_the_buttons(studio):
     assert tap(b)["toast"] == "Already done" and studio.spawned == []
 
 
+
+def test_a_broken_watcher_is_said_once_and_so_is_its_recovery(studio):
+    studio.cli.reply("stops", 1, "", "studio stops: boom\n")
+    studio_stops.watch_stops()
+    studio_stops.watch_stops()
+    assert len(studio.sent) == 1 and "stop watcher" in studio.sent[0]["text"]
+    studio.pending()
+    studio_stops.watch_stops()
+    studio_stops.watch_stops()
+    assert len(studio.sent) == 2 and "working again" in studio.sent[-1]["text"]
+
 def test_register_studio_stops_every_two_minutes(monkeypatch):
     from scheduler import SchedulerService
 
