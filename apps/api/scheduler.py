@@ -269,6 +269,36 @@ class SchedulerService:
         except Exception as e:
             print(f"{log_ts()} [scheduler] Failed to register deskview-alerts: {e}")
 
+    async def _run_studio_radar(self) -> None:
+        """Launch Studio radar (M5): headless `studio radar` → brief cards. The
+        subprocess runs in a thread so the event loop keeps serving."""
+        try:
+            from dispatch.studio_radar import run_radar_job
+            res = await asyncio.to_thread(run_radar_job)
+            print(f"{log_ts()} [scheduler] studio-radar: {res}")
+        except Exception as e:  # noqa: BLE001
+            print(f"{log_ts()} [scheduler] studio-radar error: {e}")
+
+    def register_studio_radar(self) -> None:
+        """Every STUDIO_RADAR_EVERY_H hours at :07 ET. Off unless STUDIO_ENABLED=1:
+        every run spends Claude usage."""
+        from dispatch.studio_radar import TZ, enabled, every_hours
+        n = every_hours()
+        if not enabled() or n == 0:
+            print("[scheduler] studio-radar off (STUDIO_ENABLED / STUDIO_RADAR_EVERY_H)")
+            return
+        job_id = "studio-radar"
+        if self._scheduler.get_job(job_id):
+            return
+        try:
+            trigger = CronTrigger(hour=f"*/{n}", minute=7, timezone=TZ)
+            self._scheduler.add_job(self._run_studio_radar, trigger=trigger, id=job_id,
+                                    replace_existing=True, max_instances=1, coalesce=True)
+            self._schedules[job_id] = f"7 */{n} * * * America/New_York"
+            print(f"[scheduler] Registered default: studio-radar @ every {n}h")
+        except Exception as e:
+            print(f"{log_ts()} [scheduler] Failed to register studio-radar: {e}")
+
     async def _run_digest(self) -> None:
         """Run the wiki daily digest."""
         try:

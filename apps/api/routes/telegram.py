@@ -292,6 +292,9 @@ def _handle_callback(data: str, chat_id: int) -> dict:
         return _handle_run_callback(data, chat_id)
     if action == "apply":
         return _handle_apply_callback(data, chat_id)
+    if action == "st":
+        from dispatch import studio
+        return studio.handle_callback(data, chat_id)
     return {"ok": True, "status": "unknown_action"}
 
 
