@@ -80,6 +80,12 @@ def report(slug: str, kind: str, detail: str) -> None:
     chat = bo_chat()
     if chat is None or kind in ("stop", "locked"):
         return
+    if kind == "fail" and detail == "no progress at ready":
+        # Headless studio-ops ends its run at ready: the token is Bo's to create, and his CA comes next.
+        dispatcher.send_telegram_message(chat, format_telegram(
+            f"{slug} is ready for launch. Create the token on pump.fun from your wallet, "
+            f"then send /studio ca {slug} <CA>."))
+        return
     if kind == "fail":
         tok = tokens.mint("retry", {"slug": slug}, slug=slug)
         send_card(chat, failure_card(slug, detail, tok, f"logs/studio-{slug}.log"))

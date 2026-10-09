@@ -7,6 +7,7 @@ acts once. Nothing here answers a stop on its own: only Bo's tap reaches
 `studio answer`."""
 from __future__ import annotations
 
+import re
 import threading
 from typing import Optional
 
@@ -222,3 +223,40 @@ def start_radar_now(chat_id: int) -> None:
         return
     _say(chat_id, "Radar started. New briefs arrive here in about 30 to 40 minutes.")
     _start(lambda: studio_radar.run_radar_job(force=True))
+
+
+GOLIVE_TIMEOUT_S = 600  # go-live checks the mint on chain and waits for the site's health
+_MINT_RE = re.compile(r"^[1-9A-HJ-NP-Za-km-z]{32,44}$")  # a base58 Solana address
+CA_USAGE = "Usage: /studio ca <slug> <CA>, once the token is live on pump.fun from your wallet."
+
+
+def take_ca(chat_id: int, arg: str) -> None:
+    """Bo's CA from Telegram (contracts §14): `studio go-live <slug> --ca <mint>` puts it in
+    the site's env (still pre-launch) and opens the go-live stop, whose card turns pre-launch off."""
+    from dispatch import studio_radar
+
+    parts = (arg or "").split()
+    if len(parts) != 3 or not studio_client.SLUG_RE.match(parts[1]) or not _MINT_RE.match(parts[2]):
+        _say(chat_id, CA_USAGE)
+        return
+    if not studio_radar.enabled():
+        _say(chat_id, "Launch Studio is off: set STUDIO_ENABLED=1 in the mesh's .env.")
+        return
+    slug, mint = parts[1], parts[2]
+    _say(chat_id, f"Checking the CA for {slug}. The go-live card follows.")
+    _start(lambda: _go_live(chat_id, slug, mint))
+
+
+def _go_live(chat_id: int, slug: str, mint: str) -> None:
+    from dispatch.studio_stops import watch_stops
+
+    res = studio_client.run(["go-live", slug, "--ca", mint], timeout=GOLIVE_TIMEOUT_S)
+    if res.code == 3 and res.last.startswith("GOLIVE "):
+        watched = watch_stops()  # card it now, not at the next two-minute tick
+        if watched.get("status") == "ok" and not watched.get("sent"):
+            _say(chat_id, f"{slug}: its go-live card is already waiting above.")
+        return
+    if res.ok and res.last == f"LIVE {slug}":
+        _say(chat_id, f"{slug} is live.")
+        return
+    _say(chat_id, f"Couldn't take the CA for {slug}: {res.error or 'the studio gave no GOLIVE line'}")

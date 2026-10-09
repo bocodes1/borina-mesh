@@ -153,7 +153,8 @@ _HELP_TEXT = (
     "/jobs — running &amp; recent jobs, with cancel buttons\n"
     "/fleet — the agent roster and states\n"
     "/cancel &lt;id&gt; — stop a running job\n"
-    "/studio — Launch Studio projects and stops; /studio radar runs one now\n\n"
+    "/studio — Launch Studio projects and stops; /studio radar runs one now; "
+    "/studio ca &lt;slug&gt; &lt;CA&gt; takes the token's CA for go-live\n\n"
     "<b>Power use</b>\n"
     "• <code>trader: …</code> — address one agent directly\n"
     "• <code>mission: …</code> — decompose across agents and synthesize\n"
@@ -266,6 +267,9 @@ def _handle_command(cmd: str, arg: str, chat_id: int) -> dict:
         if (arg or "").strip().lower() == "radar":
             studio.start_radar_now(chat_id)
             return {"ok": True, "status": "studio_radar"}
+        if (arg or "").strip().lower().split()[:1] == ["ca"]:
+            studio.take_ca(chat_id, arg)
+            return {"ok": True, "status": "studio_ca"}
         studio.send_status(chat_id)
         return {"ok": True, "status": "studio"}
     return {"ok": True, "status": "unknown_command"}
