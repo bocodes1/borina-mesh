@@ -41,8 +41,8 @@ class StudioResult:
         return self.code == 0
 
 
-# (argv, cwd, env, timeout) -> (exit code, or None on timeout; stdout)
-Runner = Callable[[list[str], Path, dict, float], tuple[Optional[int], str]]
+# (argv, cwd, env, timeout) -> (exit code, or None on timeout; stdout; stderr)
+Runner = Callable[[list[str], Path, dict, float], tuple[Optional[int], str, str]]
 
 
 def studio_dir() -> Path:
@@ -74,18 +74,18 @@ def _killpg(pid: int, grace: float = 3.0) -> None:
         pass
 
 
-def popen_runner(argv: list[str], cwd: Path, env: dict, timeout: float) -> tuple[Optional[int], str]:
+def popen_runner(argv: list[str], cwd: Path, env: dict, timeout: float) -> tuple[Optional[int], str, str]:
     """Own process group (start_new_session), so a timeout also kills the node and
     claude processes npx started, not just npx."""
     proc = subprocess.Popen(argv, cwd=str(cwd), env=env, stdout=subprocess.PIPE,
-                            stderr=subprocess.DEVNULL, text=True, start_new_session=True)
+                            stderr=subprocess.PIPE, text=True, start_new_session=True)
     try:
-        out, _ = proc.communicate(timeout=timeout)
-        return proc.returncode, out or ""
+        out, err = proc.communicate(timeout=timeout)
+        return proc.returncode, out or "", err or ""
     except subprocess.TimeoutExpired:
         _killpg(proc.pid)
-        out, _ = proc.communicate()
-        return None, out or ""
+        out, err = proc.communicate()
+        return None, out or "", err or ""
 
 
 runner: Runner = popen_runner  # tests replace this with a fake
@@ -104,12 +104,24 @@ def chat_reason(text: str, code: Optional[int]) -> str:
     return t[:200]
 
 
+def _stderr_reason(err: str) -> str:
+    """The studio's own error line (`studio <name>: <message>` or `usage: …`), which it
+    prints on stderr between pnpm's `$ node …` banner and its ELIFECYCLE line. Empty when
+    stderr holds a stack trace, so chat_reason falls back to the generic line."""
+    lines = [clean_line(ln) for ln in err.splitlines() if ln.strip()]
+    lines = [ln for ln in lines if not ln.startswith("$ ") and "ELIFECYCLE" not in ln
+             and not ln.lower().startswith("npm warn")]
+    if not lines or any(_TRACE_RE.search(ln) for ln in lines[-6:]):
+        return ""
+    return re.sub(r"^studio [a-z-]+: ", "", lines[-1])
+
+
 def run(args: list[str], timeout: float = 120.0) -> StudioResult:
     d = studio_dir()
     if not d.is_dir():
         return StudioResult(None, error="launch-studio is not installed on this machine")
     try:
-        code, out = runner([*STUDIO_CMD, *args], d, studio_env(), timeout)
+        code, out, err = runner([*STUDIO_CMD, *args], d, studio_env(), timeout)
     except FileNotFoundError:
         return StudioResult(None, error="npx is not on the mesh's PATH")
     except Exception as exc:  # noqa: BLE001 — a broken studio must never crash a handler
@@ -119,11 +131,14 @@ def run(args: list[str], timeout: float = 120.0) -> StudioResult:
     lines = [clean_line(ln) for ln in printed]
     last = lines[-1] if lines else ""
     print(f"[studio] {args[0] if args else '-'} -> exit {code}: {last[:160]}")
+    if code != 0:
+        for ln in err.splitlines()[-8:]:  # the details chat_reason points Bo at
+            print(f"[studio] {args[0] if args else '-'} stderr: {clean_line(ln)}")
     if code is None:
         return StudioResult(None, last, lines, f"timed out after {int(timeout)} s", raw)
     if code == 0:
         return StudioResult(0, last, lines, "", raw)
-    detail = last[len("FAIL "):] if last.startswith("FAIL ") else last
+    detail = last[len("FAIL "):] if last.startswith("FAIL ") else (_stderr_reason(err) or last)
     return StudioResult(code, last, lines, chat_reason(detail, code), raw)
 
 

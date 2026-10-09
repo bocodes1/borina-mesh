@@ -130,7 +130,8 @@ def test_an_answer_made_elsewhere_retires_the_buttons(studio):
     studio.pending(stop())
     studio_stops.watch_stops()
     a, b, _redo = [d for _, d in buttons(_card(studio))]
-    studio.cli.reply("answer", 1, "FAIL already answered\n")
+    studio.cli.reply("answer", 1, "", "$ node --import tsx scripts/studio.ts answer sample-desk look-1 a --by telegram\n"
+                     "studio answer: already answered\n[ELIFECYCLE] Command failed with exit code 1.\n")
     assert tap(a)["toast"] == "Already answered"
     assert tap(b)["toast"] == "Already done" and studio.spawned == []
 

@@ -16,15 +16,16 @@ class FakeStudio:
 
     def __init__(self) -> None:
         self.calls: list[list[str]] = []
-        self.replies: dict[str, tuple[Optional[int], str]] = {}
+        self.replies: dict[str, tuple[Optional[int], str, str]] = {}
 
-    def reply(self, sub: str, code: Optional[int], out: str) -> None:
-        self.replies[sub] = (code, out)
+    def reply(self, sub: str, code: Optional[int], out: str, err: str = "") -> None:
+        """`err` is stderr: the real CLI prints its own errors (`studio <name>: …`) there."""
+        self.replies[sub] = (code, out, err)
 
     def __call__(self, argv, cwd, env, timeout):
         args = list(argv[4:])  # after: npx -y pnpm@12.8.1 studio
         self.calls.append(args)
-        return self.replies.get(args[0] if args else "", (1, "FAIL nothing scripted\n"))
+        return self.replies.get(args[0] if args else "", (1, "FAIL nothing scripted\n", ""))
 
     def subcommands(self) -> list[str]:
         return [c[0] for c in self.calls if c]

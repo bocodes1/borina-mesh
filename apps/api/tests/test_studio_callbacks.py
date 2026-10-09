@@ -80,3 +80,10 @@ def test_a_stranger_tapping_a_studio_button_is_ignored(studio):
 
 def test_an_unknown_token_is_only_a_toast(studio):
     assert tap("st:deadbeef")["toast"] == "That button has expired"
+
+
+def test_a_new_the_studio_refuses_says_why(studio):
+    studio.cli.reply("new", 1, "", "$ node --import tsx scripts/studio.ts new --brief x\n"
+                     "studio new: project sample-desk exists\n[ELIFECYCLE] Command failed with exit code 1.\n")
+    assert tap(_build_token())["status"] == "studio_build_failed"
+    assert "project sample-desk exists" in studio.sent[-1]["text"]
