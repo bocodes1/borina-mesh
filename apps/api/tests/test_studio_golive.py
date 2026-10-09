@@ -71,3 +71,9 @@ def test_a_run_that_rests_at_ready_asks_for_the_ca_not_a_retry(env):
              sleep=lambda s: None)
     msg = env.sent[-1]
     assert "/studio ca sample-desk &lt;CA&gt;" in msg["text"] and msg["reply_markup"] is None
+
+
+def test_a_run_that_ends_at_stage_ready_asks_for_the_ca_too(env):
+    sr.drive("sample-desk", run=lambda args, timeout: StudioResult(0, "STAGE sample-desk ready"), sleep=lambda s: None)
+    msg = env.sent[-1]
+    assert "/studio ca sample-desk &lt;CA&gt;" in msg["text"] and msg["reply_markup"] is None
