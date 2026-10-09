@@ -98,6 +98,11 @@ def _retry(data: str, tok: dict, chat_id: int) -> dict:
     return _toast("studio_retry", "Restarted", slug=slug)
 
 
+def _thread(chat_id: int, message_id: Optional[int], slug: str, stop_id: str) -> None:
+    """Every card about a stop takes reply-notes, so a reply never reaches the mesh's command regexes."""
+    dispatcher._record_thread(chat_id, message_id, "studio", None, f"{slug} {stop_id}")
+
+
 def _mark_stop(slug: str, stop_id: str) -> None:
     from db import session_scope
     from models import StudioStop
@@ -123,7 +128,8 @@ def _answer(data: str, tok: dict, chat_id: int) -> dict:
         confirm = tokens.mint("confirm", p, slug=p["slug"], stop_id=p["stopId"])
         cancel = tokens.mint("cancel", {"slug": p["slug"], "stopId": p["stopId"], "confirm": confirm},
                              slug=p["slug"], stop_id=p["stopId"])
-        send_card(chat_id, confirm_card(stop, p.get("label") or "Yes", confirm, cancel))
+        mid = send_card(chat_id, confirm_card(stop, p.get("label") or "Yes", confirm, cancel))
+        _thread(chat_id, mid, p["slug"], p["stopId"])
         return _toast("studio_confirm_asked", "Confirm the spend")
     if tokens.claim(data) is None:
         return _toast("studio_answer", "Already done")
@@ -175,6 +181,7 @@ def handle_reply(thread, text: str, chat_id: int) -> dict:
     slug, _, stop_id = (thread.prompt or "").partition(" ")
     note = (text or "").strip()[:1000]
     if not note:
+        _say(chat_id, "Send the note as text, as a reply to the card.")
         return _toast("studio_note_empty", "")
     stops = studio_client.pending_stops()
     if stops is None:
@@ -184,7 +191,8 @@ def handle_reply(thread, text: str, chat_id: int) -> dict:
     if st is None:
         _say(chat_id, f"{stop_id} isn't waiting any more.")
         return _toast("studio_note_stale", "")
-    send_card(chat_id, note_card(st, note, option_tokens(st, note)))
+    mid = send_card(chat_id, note_card(st, note, option_tokens(st, note)))
+    _thread(chat_id, mid, slug, stop_id)
     return _toast("studio_note", "", slug=slug)
 
 

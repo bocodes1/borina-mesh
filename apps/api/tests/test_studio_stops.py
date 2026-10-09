@@ -147,6 +147,33 @@ def test_a_broken_watcher_is_said_once_and_so_is_its_recovery(studio):
     studio_stops.watch_stops()
     assert len(studio.sent) == 2 and "working again" in studio.sent[-1]["text"]
 
+
+def test_a_reply_to_the_note_card_is_a_note_too(studio, monkeypatch):
+    monkeypatch.setattr(builder, "start_build", lambda *a, **k: pytest.fail("a studio note must never start a mesh build"))
+    studio.pending(stop())
+    studio_stops.watch_stops()
+    _reply(_card(studio)["message_id"], "make the hero darker")
+    assert _reply(_card(studio)["message_id"], "Ship, but make it darker still")["status"] == "studio_note"
+    assert "Note: Ship, but make it darker still" in _card(studio)["text"]
+
+
+def test_a_reply_to_the_money_confirm_card_is_a_note_too(studio, monkeypatch):
+    monkeypatch.setattr(builder, "start_build", lambda *a, **k: pytest.fail("a studio note must never start a mesh build"))
+    studio.pending(stop(id="cost-1", cost=12.5, options=(("yes", "Yes"), ("no", "No"))))
+    studio_stops.watch_stops()
+    tap(buttons(_card(studio))[0][1])
+    assert _reply(_card(studio)["message_id"], "Ship: only the cheaper pack")["status"] == "studio_note"
+    assert "answer" not in studio.cli.subcommands()
+
+
+def test_a_reply_without_text_to_a_stop_card_asks_for_text(studio):
+    studio.pending(stop())
+    studio_stops.watch_stops()
+    card = _card(studio)
+    res = tg.process_update({"update_id": 78, "message": {"chat": {"id": BO}, "photo": [{"file_id": "x"}],
+                                                         "reply_to_message": {"message_id": card["message_id"]}}})
+    assert res["status"] == "studio_note_empty" and "as text" in studio.sent[-1]["text"]
+
 def test_register_studio_stops_every_two_minutes(monkeypatch):
     from scheduler import SchedulerService
 
