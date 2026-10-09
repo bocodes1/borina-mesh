@@ -7,6 +7,7 @@ acts once. Nothing here answers a stop on its own: only Bo's tap reaches
 `studio answer`."""
 from __future__ import annotations
 
+import threading
 from typing import Optional
 
 from dispatch import dispatcher, studio_client, studio_runner
@@ -184,3 +185,40 @@ def handle_reply(thread, text: str, chat_id: int) -> dict:
         return _toast("studio_note_stale", "")
     send_card(chat_id, note_card(st, note, option_tokens(st, note)))
     return _toast("studio_note", "", slug=slug)
+
+
+def _start(target) -> None:
+    threading.Thread(target=target, daemon=True).start()
+
+
+def radar_line() -> str:
+    from db import session_scope
+    from models import PipelineRun
+
+    with session_scope() as s:
+        row = s.get(PipelineRun, "studio-radar")
+        if row is None or row.last_run_at is None:
+            return "Radar: no run yet."
+        state = "ok" if row.last_run_ok else "failed"
+        return f"Radar: last run {row.last_run_at:%Y-%m-%d %H:%M} UTC, {state} ({row.last_run_detail or '-'})"
+
+
+def send_status(chat_id: int) -> None:
+    from dispatch.cards import send_card
+    from dispatch.studio_cards import status_card
+
+    projects = studio_client.projects()
+    if projects is None:
+        _say(chat_id, "Launch Studio isn't answering right now (studio status failed).")
+        return
+    send_card(chat_id, status_card(projects, studio_client.pending_stops() or [], radar_line()))
+
+
+def start_radar_now(chat_id: int) -> None:
+    from dispatch import studio_radar
+
+    if not studio_radar.enabled():
+        _say(chat_id, "Launch Studio is off: set STUDIO_ENABLED=1 in the mesh's .env.")
+        return
+    _say(chat_id, "Radar started. New briefs arrive here in about 30 to 40 minutes.")
+    _start(lambda: studio_radar.run_radar_job(force=True))

@@ -55,7 +55,13 @@ def install(monkeypatch, tmp_path) -> SimpleNamespace:
     monkeypatch.setattr(dispatcher, "answer_callback_query", lambda *a, **k: None)
     spawned: list[str] = []
     monkeypatch.setattr(studio_runner, "spawn_run", lambda slug: spawned.append(slug) or 4242)
-    return SimpleNamespace(cli=cli, sent=sent, spawned=spawned)
+    # A text that misses every command falls through to the converse lane, which
+    # starts a real `claude -p` in a thread: record it instead.
+    import routes.telegram as tg
+
+    conversed: list[str] = []
+    monkeypatch.setattr(tg, "_run_converse", lambda text, chat_id, heard="": conversed.append(text))
+    return SimpleNamespace(cli=cli, sent=sent, spawned=spawned, conversed=conversed)
 
 
 def clean_tables() -> None:

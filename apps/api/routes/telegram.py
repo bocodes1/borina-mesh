@@ -134,7 +134,7 @@ def _fleet_status_text() -> str:
 
 
 # ── slash commands (registered with setMyCommands so they autocomplete) ──────────
-_CMD_RE = re.compile(r"^\s*/(?P<cmd>help|jobs|fleet|cancel|start)\b(?:@\w+)?\s*(?P<arg>.*)$", re.IGNORECASE | re.DOTALL)
+_CMD_RE = re.compile(r"^\s*/(?P<cmd>help|jobs|fleet|cancel|start|studio)\b(?:@\w+)?\s*(?P<arg>.*)$", re.IGNORECASE | re.DOTALL)
 
 COMMANDS = [
     {"command": "help", "description": "What Borina can do + how to talk to it"},
@@ -142,6 +142,7 @@ COMMANDS = [
     {"command": "fleet", "description": "Agent roster and their states"},
     {"command": "cancel", "description": "Cancel a running job: /cancel <id>"},
     {"command": "apply", "description": "Stage internship cold emails: apply: <criteria>"},
+    {"command": "studio", "description": "Launch Studio: projects, stops, radar now"},
 ]
 
 _HELP_TEXT = (
@@ -151,7 +152,8 @@ _HELP_TEXT = (
     "<b>Commands</b>\n"
     "/jobs — running &amp; recent jobs, with cancel buttons\n"
     "/fleet — the agent roster and states\n"
-    "/cancel &lt;id&gt; — stop a running job\n\n"
+    "/cancel &lt;id&gt; — stop a running job\n"
+    "/studio — Launch Studio projects and stops; /studio radar runs one now\n\n"
     "<b>Power use</b>\n"
     "• <code>trader: …</code> — address one agent directly\n"
     "• <code>mission: …</code> — decompose across agents and synthesize\n"
@@ -259,6 +261,13 @@ def _handle_command(cmd: str, arg: str, chat_id: int) -> dict:
             return {"ok": True, "status": "cancel_usage"}
         dispatcher.send_telegram_message(chat_id, format_telegram(_do_cancel(int(m.group()))))
         return {"ok": True, "status": "cancel"}
+    if cmd == "studio":
+        from dispatch import studio
+        if (arg or "").strip().lower() == "radar":
+            studio.start_radar_now(chat_id)
+            return {"ok": True, "status": "studio_radar"}
+        studio.send_status(chat_id)
+        return {"ok": True, "status": "studio"}
     return {"ok": True, "status": "unknown_command"}
 
 
