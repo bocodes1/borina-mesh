@@ -299,6 +299,33 @@ class SchedulerService:
         except Exception as e:
             print(f"{log_ts()} [scheduler] Failed to register studio-radar: {e}")
 
+    async def _run_studio_stops(self) -> None:
+        """Launch Studio stop watcher (M5): NON-LLM, cards each new stop once."""
+        try:
+            from dispatch.studio_stops import watch_stops
+            res = await asyncio.to_thread(watch_stops)
+            if res.get("sent"):
+                print(f"{log_ts()} [scheduler] studio-stops: {res}")
+        except Exception as e:  # noqa: BLE001
+            print(f"{log_ts()} [scheduler] studio-stops error: {e}")
+
+    def register_studio_stops(self) -> None:
+        """Every 2 minutes, only when STUDIO_ENABLED=1. Costs no Claude usage."""
+        from dispatch.studio_radar import enabled
+        if not enabled():
+            print("[scheduler] studio-stops off (STUDIO_ENABLED unset)")
+            return
+        job_id = "studio-stops"
+        if self._scheduler.get_job(job_id):
+            return
+        try:
+            self._scheduler.add_job(self._run_studio_stops, trigger=parse_cron("*/2 * * * *"), id=job_id,
+                                    replace_existing=True, max_instances=1, coalesce=True)
+            self._schedules[job_id] = "*/2 * * * *"
+            print("[scheduler] Registered default: studio-stops (non-LLM) @ */2")
+        except Exception as e:
+            print(f"{log_ts()} [scheduler] Failed to register studio-stops: {e}")
+
     async def _run_digest(self) -> None:
         """Run the wiki daily digest."""
         try:

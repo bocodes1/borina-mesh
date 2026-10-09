@@ -49,6 +49,12 @@ def handle_callback(data: str, chat_id: int) -> dict:
         return _skip(data, tok)
     if kind == "retry":
         return _retry(data, tok, chat_id)
+    if kind == "answer":
+        return _answer(data, tok, chat_id)
+    if kind == "confirm":
+        return _confirm(data, tok, chat_id)
+    if kind == "cancel":
+        return _cancel(data, tok, chat_id)
     return _toast("studio_unknown", "")
 
 
@@ -88,3 +94,93 @@ def _retry(data: str, tok: dict, chat_id: int) -> dict:
         return _toast("studio_retry_bad", "Unknown project")
     _say(chat_id, f"Restarted {slug}.")
     return _toast("studio_retry", "Restarted", slug=slug)
+
+
+def _mark_stop(slug: str, stop_id: str) -> None:
+    from db import session_scope
+    from models import StudioStop
+
+    with session_scope() as s:
+        row = s.get(StudioStop, f"{slug}/{stop_id}")
+        if row is not None:
+            row.status = "answered"
+            s.add(row)
+            s.commit()
+
+
+def _answer(data: str, tok: dict, chat_id: int) -> dict:
+    from dispatch.cards import send_card
+    from dispatch.studio_cards import confirm_card
+
+    p = tok["payload"]
+    if tok["used"]:
+        return _toast("studio_answer", "Already done")
+    if p.get("cost") is not None and p.get("option") == "yes":
+        # Money: this tap only asks. Spending needs the separate Confirm tap.
+        stop = {"slug": p["slug"], "title": p.get("title") or p["stopId"], "costUsd": p["cost"]}
+        confirm = tokens.mint("confirm", p, slug=p["slug"], stop_id=p["stopId"])
+        cancel = tokens.mint("cancel", {"slug": p["slug"], "stopId": p["stopId"], "confirm": confirm},
+                             slug=p["slug"], stop_id=p["stopId"])
+        send_card(chat_id, confirm_card(stop, p.get("label") or "Yes", confirm, cancel))
+        return _toast("studio_confirm_asked", "Confirm the spend")
+    if tokens.claim(data) is None:
+        return _toast("studio_answer", "Already done")
+    return _submit(data, p, chat_id)
+
+
+def _confirm(data: str, tok: dict, chat_id: int) -> dict:
+    if tokens.claim(data) is None:
+        return _toast("studio_answer", "Already done")
+    return _submit(data, tok["payload"], chat_id)
+
+
+def _cancel(data: str, tok: dict, chat_id: int) -> dict:
+    if tokens.claim(data) is None:
+        return _toast("studio_cancel", "Already done")
+    p = tok["payload"]
+    tokens.claim(p.get("confirm", ""))  # its Confirm button can't spend later
+    _say(chat_id, f"Nothing spent. {p['slug']} is still waiting on {p['stopId']}.")
+    return _toast("studio_cancel", "Cancelled")
+
+
+def _submit(data: str, p: dict, chat_id: int) -> dict:
+    slug, stop_id, option, note = p["slug"], p["stopId"], p["option"], p.get("note")
+    args = ["answer", slug, stop_id, option, "--by", "telegram"]
+    if note:
+        args.append(f"--note={note}")  # one argv element, so a note starting with "-" is never a flag
+    res = studio_client.run(args, timeout=90)
+    if res.ok and res.last.startswith(f"ANSWERED {slug} {stop_id} "):
+        tokens.retire_stop(slug, stop_id)
+        _mark_stop(slug, stop_id)
+        studio_runner.spawn_run(slug)
+        _say(chat_id, f"{slug}: {option} on {stop_id}. Continuing.")
+        return _toast("studio_answered", "Answered", slug=slug)
+    if "already answered" in f"{res.last} {res.error}".lower():
+        tokens.retire_stop(slug, stop_id)
+        _mark_stop(slug, stop_id)
+        return _toast("studio_answer", "Already answered")
+    tokens.release(data)
+    _say(chat_id, f"Couldn't answer {stop_id}: {res.error or 'the studio gave no ANSWERED line'}")
+    return _toast("studio_answer_failed", "Failed")
+
+
+def handle_reply(thread, text: str, chat_id: int) -> dict:
+    """Bo replied to a stop card: the text is a note, and he picks the answer it goes with."""
+    from dispatch.cards import send_card
+    from dispatch.studio_cards import note_card
+    from dispatch.studio_stops import option_tokens, valid_stop
+
+    slug, _, stop_id = (thread.prompt or "").partition(" ")
+    note = (text or "").strip()[:1000]
+    if not note:
+        return _toast("studio_note_empty", "")
+    stops = studio_client.pending_stops()
+    if stops is None:
+        _say(chat_id, "Couldn't reach the studio. Send the note again in a minute.")
+        return _toast("studio_note_failed", "")
+    st = next((s for s in stops if valid_stop(s) and s["slug"] == slug and s["id"] == stop_id), None)
+    if st is None:
+        _say(chat_id, f"{stop_id} isn't waiting any more.")
+        return _toast("studio_note_stale", "")
+    send_card(chat_id, note_card(st, note, option_tokens(st, note)))
+    return _toast("studio_note", "", slug=slug)

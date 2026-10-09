@@ -705,6 +705,16 @@ def process_update(update: dict) -> dict:
         except Exception:  # noqa: BLE001
             pass
 
+    # 2a. A reply to a Launch Studio stop card is a note for that stop. Checked
+    # before the command regexes, so "Ship, but make the hero darker" is never
+    # read as a mesh "ship:" build.
+    studio_reply_to = (msg.get("reply_to_message") or {}).get("message_id")
+    if studio_reply_to and text:
+        studio_thread = dispatcher.find_thread(chat_id, studio_reply_to)
+        if studio_thread and studio_thread.agent_id == "studio":
+            from dispatch import studio
+            return studio.handle_reply(studio_thread, text, chat_id)
+
     # 2b1. Builder: "build: X" / "ship: X" — autonomous code change in a
     # detached worktree runner. The generic forbidden gate is deliberately not
     # applied to build texts (a code task mentioning "delete" is not a live
