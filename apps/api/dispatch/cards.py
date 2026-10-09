@@ -34,13 +34,16 @@ class Card:
     lines: list[str] = field(default_factory=list)
     actions: list[Action] = field(default_factory=list)
     buttons_per_row: int = 3
+    # Lines hold model-written or third-party text (Launch Studio): escape only,
+    # never render markdown or links.
+    plain: bool = False
 
 
 def render_card(card: Card) -> tuple[str, Optional[dict]]:
     """Card → (html_text, reply_markup|None). Buttons are chunked into rows."""
     parts = [f"<b>{escape_html(card.headline)}</b>"]
     for ln in card.lines:
-        parts.append("• " + _render_inline(ln))
+        parts.append("• " + (escape_html(ln) if card.plain else _render_inline(ln)))
     text = "\n".join(parts)
 
     markup = None
